@@ -1,5 +1,6 @@
 window.addEventListener('load', () => {
-    const socket = io('http://localhost:3000');
+    // Change this line in client/script.js
+const socket = io('https://our-drawing-app-server.onrender.com');
 
     // --- NEW: Modal and User List Elements ---
     const signatureModal = document.getElementById('signature-modal');
