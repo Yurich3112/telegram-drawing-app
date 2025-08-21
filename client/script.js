@@ -138,7 +138,7 @@ window.addEventListener('load', async () => {
 	let viewScale = 1;
 	let viewOffsetX = 0;
 	let viewOffsetY = 0;
-	const MIN_SCALE = 0.25;
+	let MIN_SCALE = 0.02;
 	const MAX_SCALE = 8;
 
 	// Pointer state
@@ -172,6 +172,9 @@ window.addEventListener('load', async () => {
 		displayCanvas.height = Math.max(1, Math.floor(rect.height * dpr));
 		displayCanvas.style.width = rect.width + 'px';
 		displayCanvas.style.height = rect.height + 'px';
+		// Allow zooming out to at least fit the full canvas (with a small margin)
+		const fitScale = Math.min(rect.width / drawingCanvas.width, rect.height / drawingCanvas.height);
+		MIN_SCALE = Math.min(fitScale * 0.98, 0.02);
 		render();
 		socket.emit('requestCanvasState');
 	}
@@ -328,6 +331,32 @@ window.addEventListener('load', async () => {
 						inSpan = false;
 					}
 				}
+			}
+		}
+
+		// Expand mask by 1px to overlap anti-aliased edges
+		{
+			const expanded = new Uint8Array(width * height);
+			for (let y = 0; y < height; y++) {
+				const rowOffset = y * width;
+				for (let x = 0; x < width; x++) {
+					const base = (rowOffset + x) * 4;
+					if (mask[base + 3]) {
+						for (let oy = -1; oy <= 1; oy++) {
+							const ny = y + oy;
+							if (ny < 0 || ny >= height) continue;
+							const nRowOffset = ny * width;
+							for (let ox = -1; ox <= 1; ox++) {
+								const nx = x + ox;
+								if (nx < 0 || nx >= width) continue;
+								expanded[nRowOffset + nx] = 1;
+							}
+						}
+					}
+				}
+			}
+			for (let i = 0; i < expanded.length; i++) {
+				mask[i * 4 + 3] = expanded[i] ? 255 : 0;
 			}
 		}
 
