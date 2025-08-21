@@ -41,9 +41,17 @@ window.addEventListener('load', () => {
 	sigCtx.lineWidth = 3;
 	sigCtx.lineCap = 'round';
 
+	function getSigCoords(e) {
+		const rect = signatureCanvas.getBoundingClientRect();
+		const x = e.clientX - rect.left;
+		const y = e.clientY - rect.top;
+		return { x, y };
+	}
+
 	function handleSigStart(e) {
 		isSigDrawing = true;
-		[lastSigX, lastSigY] = [e.offsetX, e.offsetY];
+		const p = e.offsetX !== undefined ? { x: e.offsetX, y: e.offsetY } : getSigCoords(e);
+		[lastSigX, lastSigY] = [p.x, p.y];
 		confirmBtn.disabled = false; // Enable button once they start drawing
 	}
 
@@ -51,9 +59,10 @@ window.addEventListener('load', () => {
 		if (!isSigDrawing) return;
 		sigCtx.beginPath();
 		sigCtx.moveTo(lastSigX, lastSigY);
-		sigCtx.lineTo(e.offsetX, e.offsetY);
+		const p = e.offsetX !== undefined ? { x: e.offsetX, y: e.offsetY } : getSigCoords(e);
+		sigCtx.lineTo(p.x, p.y);
 		sigCtx.stroke();
-		[lastSigX, lastSigY] = [e.offsetX, e.offsetY];
+		[lastSigX, lastSigY] = [p.x, p.y];
 	}
 
 	function handleSigStop() {
@@ -64,6 +73,11 @@ window.addEventListener('load', () => {
 	signatureCanvas.addEventListener('mousemove', handleSigDraw);
 	signatureCanvas.addEventListener('mouseup', handleSigStop);
 	signatureCanvas.addEventListener('mouseleave', handleSigStop);
+	// Pointer events for mobile signature
+	signatureCanvas.addEventListener('pointerdown', (e) => { handleSigStart(e); e.preventDefault(); }, { passive: false });
+	signatureCanvas.addEventListener('pointermove', (e) => { handleSigDraw(e); e.preventDefault(); }, { passive: false });
+	signatureCanvas.addEventListener('pointerup', (e) => { handleSigStop(); e.preventDefault(); }, { passive: false });
+	signatureCanvas.addEventListener('pointercancel', (e) => { handleSigStop(); e.preventDefault(); }, { passive: false });
 
 	// Join button sends signature to server and hides the modal
 	confirmBtn.addEventListener('click', () => {
@@ -94,6 +108,13 @@ window.addEventListener('load', () => {
 	const activePointers = new Map(); // id -> { clientX, clientY }
 	let drawingPointerId = null;
 	let pinchState = null; // { startDist, startScale, startOffsetX, startOffsetY, centerX, centerY }
+
+	// PC pan state
+	let isSpaceDown = false;
+	let isPanning = false;
+	let panPointerId = null;
+	let panLastClientX = 0;
+	let panLastClientY = 0;
 
 	function clampScale(s) {
 		return Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
@@ -164,11 +185,19 @@ window.addEventListener('load', () => {
 		ctx.beginPath();
 	}
 
+	function updateCursor() {
+		if (isPanning || isSpaceDown) {
+			displayCanvas.style.cursor = 'grab';
+			return;
+		}
+		displayCanvas.style.cursor = currentTool === 'fill' ? 'pointer' : 'crosshair';
+	}
+
 	function switchTool(tool) {
 		currentTool = tool;
 		document.querySelectorAll('.tool').forEach(t => t.classList.remove('active'));
 		document.getElementById(`${tool}Btn`).classList.add('active');
-		displayCanvas.style.cursor = tool === 'fill' ? 'pointer' : 'crosshair';
+		updateCursor();
 	}
 
 	function floodFill({ startX, startY, color }) {
@@ -277,10 +306,28 @@ window.addEventListener('load', () => {
 		});
 	});
 
+	// Helper: decide if this pointerdown should pan (PC)
+	function shouldPanOnPointerDown(e) {
+		// Pan if Space is held or middle mouse button
+		const isMiddleButton = e.button === 1 || (e.pointerType === 'mouse' && (e.buttons & 4) !== 0);
+		return isSpaceDown || isMiddleButton;
+	}
+
 	// Pointer input handling (supports mouse, touch, pen)
 	function onPointerDown(e) {
 		displayCanvas.setPointerCapture(e.pointerId);
 		activePointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+
+		// PC pan with space/middle mouse
+		if (shouldPanOnPointerDown(e)) {
+			isPanning = true;
+			panPointerId = e.pointerId;
+			panLastClientX = e.clientX;
+			panLastClientY = e.clientY;
+			displayCanvas.style.cursor = 'grabbing';
+			e.preventDefault();
+			return;
+		}
 
 		if (activePointers.size === 2) {
 			// Start pinch-zoom
@@ -321,6 +368,19 @@ window.addEventListener('load', () => {
 		if (!activePointers.has(e.pointerId)) return;
 		activePointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
 
+		// Ongoing PC pan
+		if (isPanning && panPointerId === e.pointerId) {
+			const dx = e.clientX - panLastClientX;
+			const dy = e.clientY - panLastClientY;
+			viewOffsetX += dx;
+			viewOffsetY += dy;
+			panLastClientX = e.clientX;
+			panLastClientY = e.clientY;
+			render();
+			e.preventDefault();
+			return;
+		}
+
 		if (activePointers.size >= 2 && pinchState) {
 			// Update pinch-zoom and pan
 			const [p1, p2] = Array.from(activePointers.values());
@@ -360,6 +420,11 @@ window.addEventListener('load', () => {
 			socket.emit('stopDrawing');
 			socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
 		}
+		if (panPointerId === e.pointerId) {
+			isPanning = false;
+			panPointerId = null;
+			updateCursor();
+		}
 		activePointers.delete(e.pointerId);
 		if (activePointers.size < 2) {
 			pinchState = null;
@@ -367,12 +432,46 @@ window.addEventListener('load', () => {
 		e.preventDefault();
 	}
 
+	function onWheel(e) {
+		// Zoom under mouse cursor
+		const rect = displayCanvas.getBoundingClientRect();
+		const xCss = e.clientX - rect.left;
+		const yCss = e.clientY - rect.top;
+		const zoomFactor = Math.exp(-e.deltaY * 0.001);
+		const newScale = clampScale(viewScale * zoomFactor);
+		const canvasX = (xCss - viewOffsetX) / viewScale;
+		const canvasY = (yCss - viewOffsetY) / viewScale;
+		viewScale = newScale;
+		viewOffsetX = xCss - canvasX * newScale;
+		viewOffsetY = yCss - canvasY * newScale;
+		render();
+		e.preventDefault();
+	}
+
+	function onKeyDown(e) {
+		if (e.code === 'Space') {
+			isSpaceDown = true;
+			updateCursor();
+			e.preventDefault();
+		}
+	}
+	function onKeyUp(e) {
+		if (e.code === 'Space') {
+			isSpaceDown = false;
+			updateCursor();
+			e.preventDefault();
+		}
+	}
+
 	// Setup local user input event listeners
 	window.addEventListener('resize', resizeCanvas);
+	window.addEventListener('keydown', onKeyDown, { passive: false });
+	window.addEventListener('keyup', onKeyUp, { passive: false });
 	displayCanvas.addEventListener('pointerdown', onPointerDown, { passive: false });
 	displayCanvas.addEventListener('pointermove', onPointerMove, { passive: false });
 	displayCanvas.addEventListener('pointerup', onPointerUp, { passive: false });
 	displayCanvas.addEventListener('pointercancel', onPointerUp, { passive: false });
+	displayCanvas.addEventListener('wheel', onWheel, { passive: false });
 
 	brushBtn.addEventListener('click', () => switchTool('brush'));
 	eraserBtn.addEventListener('click', () => switchTool('eraser'));
@@ -396,4 +495,5 @@ window.addEventListener('load', () => {
 	updatePalette();
 	switchTool('brush');
 	render();
+	updateCursor();
 });
