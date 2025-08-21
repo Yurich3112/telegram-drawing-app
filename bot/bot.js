@@ -1,15 +1,11 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
-const crypto = require('crypto');
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
-const sharedSecret = process.env.SHARED_SECRET_KEY; // unused now, kept for future
 const appUrl = process.env.APP_BASE_URL;
-const directLinkSlug = process.env.APP_DIRECT_LINK_SLUG || 'draw'; // BotFather Direct Link path
 
 if (!token || !appUrl) {
     console.error("Missing critical environment variables. Check your .env file.");
-    console.error({ hasToken: !!token, hasAppUrl: !!appUrl });
     process.exit(1);
 }
 
@@ -20,14 +16,13 @@ const bot = new TelegramBot(token, { polling: true });
 bot.on('polling_error', (err) => {
     console.error('[polling_error]', err);
     if (err && err.code === 'ETELEGRAM' && /409/.test(String(err.message))) {
-        console.error('Another instance is polling this bot. Exiting to prevent conflicts.');
         process.exit(1);
     }
 });
 
 console.log("🤖 Bot is running and waiting for commands...");
 
-function makeAppUrl(room) {
+function makeRoomUrl(room) {
     const base = appUrl.replace(/\/+$/, '');
     return `${base}/?room=${encodeURIComponent(room)}`;
 }
@@ -39,29 +34,40 @@ function makeStartAppPayload(room) {
 bot.onText(/^\/start(?:\s+(.*))?$/, (msg, match) => {
     const chatId = msg.chat.id.toString();
     if (msg.chat.type !== 'private') return;
-    const room = chatId;
-    const url = makeAppUrl(room);
-    const text = `Tap to open your canvas: <a href="${url}">Open here</a>`;
-    bot.sendMessage(chatId, text, { parse_mode: 'HTML', disable_web_page_preview: true }).catch(console.error);
+    const startParam = (match && match[1]) ? match[1].trim() : '';
+    let room = chatId;
+    if (startParam && startParam.startsWith('r_')) {
+        const decoded = decodeURIComponent(startParam.slice(2));
+        if (decoded) room = decoded;
+    }
+    const url = makeRoomUrl(room);
+    const options = { reply_markup: { inline_keyboard: [[{ text: '🎨 Open Here', web_app: { url } }, { text: '🌐 Open in Browser', url }]] } };
+    bot.sendMessage(chatId, 'Launch canvas:', options).catch(console.error);
 });
 
 bot.onText(/^\/draw(?:@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id.toString();
-    const chatType = msg.chat.type;
-    const isPrivate = chatType === 'private';
+    const isPrivate = msg.chat.type === 'private';
+    const url = makeRoomUrl(chatId);
 
     if (isPrivate) {
-        const url = makeAppUrl(chatId);
-        const text = `Tap to open your canvas: <a href="${url}">Open here</a>`;
-        bot.sendMessage(chatId, text, { parse_mode: 'HTML', disable_web_page_preview: true }).catch(console.error);
+        const options = { reply_markup: { inline_keyboard: [[{ text: '🎨 Open Here', web_app: { url } }, { text: '🌐 Open in Browser', url }]] } };
+        bot.sendMessage(chatId, 'Tap a button to open your shared canvas.', options).catch(console.error);
         return;
     }
 
-    // Group: send startapp link using the configured direct-link slug to show a rich preview card
     const me = await bot.getMe();
     const startapp = makeStartAppPayload(chatId);
-    const startAppLink = `https://t.me/${me.username}/${directLinkSlug}?startapp=${startapp}`;
-    // Send as plain text so Telegram renders the preview card
-    const text = `Launch Mini App: ${startAppLink}`;
-    bot.sendMessage(chatId, text, { disable_web_page_preview: false }).catch(console.error);
+    const startAppLink = `https://t.me/${me.username}?startapp=${startapp}`;
+
+    // DM fallback inline button
+    const userId = msg.from && msg.from.id ? msg.from.id.toString() : null;
+    if (userId) {
+        try {
+            const options = { reply_markup: { inline_keyboard: [[{ text: '🎨 Open Here', web_app: { url } }]] } };
+            await bot.sendMessage(userId, 'Open the group canvas here:', options);
+        } catch {}
+    }
+
+    bot.sendMessage(chatId, `Launch Mini App: ${startAppLink}`).catch(console.error);
 });
