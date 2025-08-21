@@ -71,6 +71,7 @@ window.addEventListener('load', async () => {
 	const clearBtn = document.getElementById('clearBtn');
 	const undoBtn = document.getElementById('undoBtn');
 	const redoBtn = document.getElementById('redoBtn');
+	const saveBtn = document.getElementById('saveBtn');
 	const brushBtn = document.getElementById('brushBtn');
 	const eraserBtn = document.getElementById('eraserBtn');
 	const fillBtn = document.getElementById('fillBtn');
@@ -636,6 +637,22 @@ window.addEventListener('load', async () => {
 
 	undoBtn.addEventListener('click', () => socket.emit('undo'));
 	redoBtn.addEventListener('click', () => socket.emit('redo'));
+
+	saveBtn.addEventListener('click', async () => {
+		try {
+			const dataUrl = drawingCanvas.toDataURL('image/png');
+			await fetch('/api/send-canvas', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ room, dataUrl })
+			});
+			if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.HapticFeedback) {
+				window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+			}
+		} catch (err) {
+			console.error('Failed to send image', err);
+		}
+	});
 
 	clearBtn.addEventListener('click', () => {
 		ctx.globalCompositeOperation = 'source-over';
