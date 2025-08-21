@@ -158,6 +158,10 @@ window.addEventListener('load', async () => {
 	let strokeStarted = false;
 	const STROKE_START_TOLERANCE_SQ = 4; // px^2
 
+	// Pending fill to avoid accidental fill during pinch/zoom
+	let pendingFill = null; // { startX, startY, color }
+	let fillPointerId = null;
+
 	function clampScale(s) { return Math.min(MAX_SCALE, Math.max(MIN_SCALE, s)); }
 	function getDPR() { return window.devicePixelRatio || 1; }
 
@@ -402,16 +406,17 @@ window.addEventListener('load', async () => {
 			pendingStroke = null;
 			strokeStarted = false;
 			drawingPointerId = null;
+			// Cancel any pending fill during pinch
+			pendingFill = null;
+			fillPointerId = null;
 			return;
 		}
 
 		// Single pointer
 		const { x, y } = canvasPointFromClient(e.clientX, e.clientY);
 		if (currentTool === 'fill') {
-			const data = { startX: x, startY: y, color: currentColor };
-			socket.emit('fill', data);
-			floodFill(data);
-			socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
+			pendingFill = { startX: x, startY: y, color: currentColor };
+			fillPointerId = e.pointerId;
 		} else {
 			isDrawing = true;
 			drawingPointerId = e.pointerId;
@@ -474,6 +479,18 @@ window.addEventListener('load', async () => {
 	}
 
 	function onPointerUp(e) {
+		// Commit pending fill only if not pinching/zooming
+		if (pendingFill && e.pointerId === fillPointerId) {
+			const data = pendingFill;
+			pendingFill = null;
+			fillPointerId = null;
+			if (!pinchState) {
+				socket.emit('fill', data);
+				floodFill(data);
+				socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
+			}
+		}
+
 		if (drawingPointerId === e.pointerId && (isDrawing || pendingStroke)) {
 			// If no movement occurred and stroke not started, treat as dot tap
 			if (!strokeStarted && pendingStroke) {
