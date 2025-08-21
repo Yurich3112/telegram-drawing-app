@@ -8,6 +8,7 @@ const appUrl = process.env.APP_BASE_URL;
 
 if (!token || !sharedSecret || !appUrl) {
     console.error("Missing critical environment variables. Check your .env file.");
+    console.error({ hasToken: !!token, hasSecret: !!sharedSecret, hasAppUrl: !!appUrl });
     process.exit(1);
 }
 
@@ -38,18 +39,31 @@ bot.onText(/^\/draw(?:@\w+)?$/, (msg) => {
     const privateUrl = `${base}/?room=${encodeURIComponent(chatId)}&token=${secureToken}`;
     console.log(`Generated Mini App URL: ${privateUrl}`);
 
-    // In groups, Telegram API forbids web_app buttons in inline keyboards → use URL button only
-    const inlineKeyboard = isPrivate
-        ? [[
-            { text: '🎨 Open Here', web_app: { url: privateUrl } },
-            { text: '🌐 Open in Browser', url: privateUrl }
-          ]]
-        : [[
-            { text: '🌐 Open Canvas', url: privateUrl }
-          ]];
+    if (isPrivate) {
+        // Private chat: inline keyboard web_app is allowed
+        const options = {
+            reply_markup: {
+                inline_keyboard: [[
+                    { text: '🎨 Open Here', web_app: { url: privateUrl } },
+                    { text: '🌐 Open in Browser', url: privateUrl }
+                ]]
+            }
+        };
+        bot.sendMessage(chatId, 'Tap a button to open your shared canvas.', options)
+           .catch(err => console.error('sendMessage error:', err));
+        return;
+    }
 
-    const options = { reply_markup: { inline_keyboard: inlineKeyboard } };
-
-    bot.sendMessage(chatId, isPrivate ? 'Tap a button to open your shared canvas.' : 'Tap to open your chat canvas in the browser.', options)
+    // Group/supergroup: use ReplyKeyboard with web_app to open Mini App
+    const keyboard = [[{ text: '🎨 Open Canvas', web_app: { url: privateUrl } }]];
+    const options = {
+        reply_markup: {
+            keyboard,
+            resize_keyboard: true,
+            one_time_keyboard: true,
+            selective: true
+        }
+    };
+    bot.sendMessage(chatId, 'Tap “Open Canvas” below to open the drawing Mini App.', options)
        .catch(err => console.error('sendMessage error:', err));
 });
