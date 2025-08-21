@@ -34,7 +34,6 @@ function makeUrlForRoom(room) {
 }
 
 function makeStartAppPayload(room) {
-    // Keep it short and URL-safe. Prefix to distinguish.
     return encodeURIComponent('r_' + room);
 }
 
@@ -69,10 +68,10 @@ bot.onText(/^\/draw(?:@\w+)?$/, async (msg) => {
         return;
     }
 
-    // Group: provide a public startapp link (opens the Mini App directly if supported by client)
+    // Group: use canonical startapp link (without slug) to maximize client compatibility
     const me = await bot.getMe();
     const startapp = makeStartAppPayload(chatId);
-    const startAppLink = `https://t.me/${me.username}/draw?startapp=${startapp}`;
+    const startAppLink = `https://t.me/${me.username}?startapp=${startapp}`;
 
     // Also DM fallback inline button
     const userId = msg.from && msg.from.id ? msg.from.id.toString() : null;
