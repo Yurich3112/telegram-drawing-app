@@ -1,11 +1,41 @@
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
 	// Tell the Telegram client that the app is ready.
 	window.Telegram.WebApp.ready();
 
-	// Parse room and token from URL
+	// Parse room and token from URL or derive via Telegram WebApp initData
 	const params = new URLSearchParams(window.location.search);
-	const room = params.get('room');
-	const token = params.get('token');
+	let room = params.get('room');
+	let token = params.get('token');
+
+	// If missing, try to derive from start/startapp and server token issuer
+	if (!room || !token) {
+		const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+		const initData = tg ? tg.initData : '';
+		const initDataUnsafe = tg ? tg.initDataUnsafe : {};
+		// start_param can carry r_<room>
+		const startParam = (initDataUnsafe && initDataUnsafe.start_param) ? initDataUnsafe.start_param : null;
+		if (startParam && startParam.startsWith('r_')) {
+			room = decodeURIComponent(startParam.slice(2));
+		}
+		// Fallback to user chat id in private chats
+		if (!room && initDataUnsafe && initDataUnsafe.user && initDataUnsafe.user.id) {
+			room = String(initDataUnsafe.user.id);
+		}
+		if (room && initData) {
+			try {
+				const res = await fetch('/api/issue-token', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ room, initData })
+				});
+				if (res.ok) {
+					const json = await res.json();
+					token = json.token;
+				}
+			} catch (e) { /* ignore */ }
+		}
+	}
+
 	if (!room || !token) {
 		alert('Missing access parameters. Please open the app from the Telegram bot button.');
 		return;
