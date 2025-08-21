@@ -5,15 +5,15 @@ window.addEventListener('load', () => {
 	// Socket connection
 	const socket = io('https://our-drawing-app-server.onrender.com');
 
-	// --- NEW: Modal and User List Elements ---
+	// --- Modal and User List Elements ---
 	const signatureModal = document.getElementById('signature-modal');
 	const signatureCanvas = document.getElementById('signature-canvas');
 	const sigCtx = signatureCanvas.getContext('2d');
 	const confirmBtn = document.getElementById('confirm-signature');
 	const userListDiv = document.getElementById('user-list');
 
-	// --- Main Canvas & Toolbar Elements ---
-	const displayCanvas = document.getElementById('drawing-canvas'); // Visible canvas (viewport)
+	// --- Canvas Elements ---
+	const displayCanvas = document.getElementById('drawing-canvas');
 	const displayCtx = displayCanvas.getContext('2d');
 	const canvasContainer = document.getElementById('canvas-container');
 
@@ -22,6 +22,19 @@ window.addEventListener('load', () => {
 	drawingCanvas.width = 2048;
 	drawingCanvas.height = 2048;
 	const ctx = drawingCanvas.getContext('2d', { willReadFrequently: true });
+
+	// --- Bottom bar elements ---
+	const expansionPanel = document.getElementById('expansion-panel');
+	const panelTools = document.getElementById('panel-tools');
+	const panelSize = document.getElementById('panel-size');
+	const panelColor = document.getElementById('panel-color');
+	const panelHistory = document.getElementById('panel-history');
+	const toolToggleBtn = document.getElementById('toolToggleBtn');
+	const sizeToggleBtn = document.getElementById('sizeToggleBtn');
+	const colorToggleBtn = document.getElementById('colorToggleBtn');
+	const historyToggleBtn = document.getElementById('historyToggleBtn');
+	const sizeDot = document.getElementById('sizeDot');
+	const colorSwatch = document.getElementById('colorSwatch');
 
 	const colorPicker = document.getElementById('colorPicker');
 	const brushSize = document.getElementById('brushSize');
@@ -33,7 +46,7 @@ window.addEventListener('load', () => {
 	const fillBtn = document.getElementById('fillBtn');
 	const paletteContainer = document.getElementById('color-palette');
 
-	// --- 1. Signature Pad Logic ---
+	// --- Signature Pad Logic ---
 	let isSigDrawing = false;
 	let lastSigX = 0;
 	let lastSigY = 0;
@@ -52,7 +65,7 @@ window.addEventListener('load', () => {
 		isSigDrawing = true;
 		const p = e.offsetX !== undefined ? { x: e.offsetX, y: e.offsetY } : getSigCoords(e);
 		[lastSigX, lastSigY] = [p.x, p.y];
-		confirmBtn.disabled = false; // Enable button once they start drawing
+		confirmBtn.disabled = false;
 	}
 
 	function handleSigDraw(e) {
@@ -65,30 +78,24 @@ window.addEventListener('load', () => {
 		[lastSigX, lastSigY] = [p.x, p.y];
 	}
 
-	function handleSigStop() {
-		isSigDrawing = false;
-	}
+	function handleSigStop() { isSigDrawing = false; }
 
 	signatureCanvas.addEventListener('mousedown', handleSigStart);
 	signatureCanvas.addEventListener('mousemove', handleSigDraw);
 	signatureCanvas.addEventListener('mouseup', handleSigStop);
 	signatureCanvas.addEventListener('mouseleave', handleSigStop);
-	// Pointer events for mobile signature
 	signatureCanvas.addEventListener('pointerdown', (e) => { handleSigStart(e); e.preventDefault(); }, { passive: false });
 	signatureCanvas.addEventListener('pointermove', (e) => { handleSigDraw(e); e.preventDefault(); }, { passive: false });
 	signatureCanvas.addEventListener('pointerup', (e) => { handleSigStop(); e.preventDefault(); }, { passive: false });
 	signatureCanvas.addEventListener('pointercancel', (e) => { handleSigStop(); e.preventDefault(); }, { passive: false });
 
-	// Join button sends signature to server and hides the modal
 	confirmBtn.addEventListener('click', () => {
 		const signatureDataUrl = signatureCanvas.toDataURL();
 		socket.emit('userSignedUp', { signature: signatureDataUrl });
 		signatureModal.classList.add('hidden');
 	});
 
-	// --- 2. Main Application Logic ---
-
-	// State Variables for Main App
+	// --- Main Application Logic ---
 	let isDrawing = false;
 	let currentTool = 'brush';
 	let currentColor = colorPicker.value;
@@ -97,17 +104,17 @@ window.addEventListener('load', () => {
 	let lastY = 0;
 	let recentColors = ['#e74c3c', '#f1c40f', '#2ecc71', '#3498db', '#9b59b6', '#1abc9c', '#e67e22', '#2c3e50'];
 
-	// Viewport transform state (applied to visible canvas only)
+	// Viewport transform state
 	let viewScale = 1;
 	let viewOffsetX = 0;
 	let viewOffsetY = 0;
 	const MIN_SCALE = 0.25;
 	const MAX_SCALE = 8;
 
-	// Active pointers for pinch-zoom/pan
-	const activePointers = new Map(); // id -> { clientX, clientY }
+	// Pointer state
+	const activePointers = new Map();
 	let drawingPointerId = null;
-	let pinchState = null; // { startDist, startScale, startOffsetX, startOffsetY, centerX, centerY }
+	let pinchState = null;
 
 	// PC pan state
 	let isSpaceDown = false;
@@ -116,16 +123,10 @@ window.addEventListener('load', () => {
 	let panLastClientX = 0;
 	let panLastClientY = 0;
 
-	function clampScale(s) {
-		return Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
-	}
-
-	function getDPR() {
-		return window.devicePixelRatio || 1;
-	}
+	function clampScale(s) { return Math.min(MAX_SCALE, Math.max(MIN_SCALE, s)); }
+	function getDPR() { return window.devicePixelRatio || 1; }
 
 	function resizeCanvas() {
-		// Fit display canvas to container size (CSS pixels) and account for DPR
 		const rect = canvasContainer.getBoundingClientRect();
 		const dpr = getDPR();
 		displayCanvas.width = Math.max(1, Math.floor(rect.width * dpr));
@@ -133,12 +134,10 @@ window.addEventListener('load', () => {
 		displayCanvas.style.width = rect.width + 'px';
 		displayCanvas.style.height = rect.height + 'px';
 		render();
-		// Ask server for the latest drawing to redraw after resize
 		socket.emit('requestCanvasState');
 	}
 
 	function render() {
-		// Clear display and draw offscreen canvas using current view transform
 		const dpr = getDPR();
 		displayCtx.setTransform(1, 0, 0, 1, 0, 0);
 		displayCtx.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
@@ -149,7 +148,6 @@ window.addEventListener('load', () => {
 	}
 
 	function canvasPointFromClient(clientX, clientY) {
-		// Map from screen (client) coordinates to drawingCanvas coordinates
 		const rect = displayCanvas.getBoundingClientRect();
 		const xCss = clientX - rect.left;
 		const yCss = clientY - rect.top;
@@ -181,22 +179,18 @@ window.addEventListener('load', () => {
 		render();
 	}
 
-	function handleStopDrawing() {
-		ctx.beginPath();
-	}
+	function handleStopDrawing() { ctx.beginPath(); }
 
 	function updateCursor() {
-		if (isPanning || isSpaceDown) {
-			displayCanvas.style.cursor = 'grab';
-			return;
-		}
+		if (isPanning || isSpaceDown) { displayCanvas.style.cursor = 'grab'; return; }
 		displayCanvas.style.cursor = currentTool === 'fill' ? 'pointer' : 'crosshair';
 	}
 
 	function switchTool(tool) {
 		currentTool = tool;
-		document.querySelectorAll('.tool').forEach(t => t.classList.remove('active'));
-		document.getElementById(`${tool}Btn`).classList.add('active');
+		[brushBtn, eraserBtn, fillBtn].forEach(b => b.classList.remove('active'));
+		const id = tool === 'brush' ? 'brushBtn' : tool === 'eraser' ? 'eraserBtn' : 'fillBtn';
+		document.getElementById(id).classList.add('active');
 		updateCursor();
 	}
 
@@ -250,15 +244,12 @@ window.addEventListener('load', () => {
 		recentColors.forEach(color => {
 			const colorCircle = document.createElement('div');
 			colorCircle.classList.add('palette-color');
-			if (color) {
-				colorCircle.style.backgroundColor = color;
-				colorCircle.addEventListener('click', () => {
-					currentColor = color;
-					colorPicker.value = color;
-				});
-			} else {
-				colorCircle.classList.add('empty');
-			}
+			colorCircle.style.backgroundColor = color;
+			colorCircle.addEventListener('click', () => {
+				currentColor = color;
+				colorPicker.value = color;
+				colorSwatch.style.backgroundColor = color;
+			});
 			paletteContainer.appendChild(colorCircle);
 		});
 	}
@@ -275,16 +266,13 @@ window.addEventListener('load', () => {
 		updatePalette();
 	}
 
-	// --- 3. Setup Socket and Event Listeners for the Main App ---
-
-	// Listen for drawing events from the server
+	// Socket events
 	socket.on('startDrawing', (data) => { handleStartDrawing(data); });
 	socket.on('draw', (data) => { handleDraw(data); });
 	socket.on('stopDrawing', () => { handleStopDrawing(); });
 	socket.on('fill', (data) => { floodFill(data); });
 	socket.on('clearCanvas', () => { ctx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height); render(); });
 
-	// Listen for history and user list updates from the server
 	socket.on('loadCanvas', ({ dataUrl }) => {
 		const img = new Image();
 		img.src = dataUrl;
@@ -306,19 +294,42 @@ window.addEventListener('load', () => {
 		});
 	});
 
-	// Helper: decide if this pointerdown should pan (PC)
+	// UI: toggle logic for bottom bar
+	function showPanel(which) {
+		[panelTools, panelSize, panelColor, panelHistory].forEach(p => p.classList.add('hidden'));
+		if (which === 'tools') panelTools.classList.remove('hidden');
+		if (which === 'size') panelSize.classList.remove('hidden');
+		if (which === 'color') panelColor.classList.remove('hidden');
+		if (which === 'history') panelHistory.classList.remove('hidden');
+		expansionPanel.classList.remove('hidden');
+	}
+	function hidePanels() { expansionPanel.classList.add('hidden'); }
+
+	function togglePanel(which) {
+		const isOpen = !expansionPanel.classList.contains('hidden');
+		const isThisVisible = !document.getElementById(`panel-${which}`).classList.contains('hidden');
+		if (!isOpen || !isThisVisible) {
+			showPanel(which);
+		} else {
+			hidePanels();
+		}
+	}
+
+	toolToggleBtn.addEventListener('click', () => togglePanel('tools'));
+	sizeToggleBtn.addEventListener('click', () => togglePanel('size'));
+	colorToggleBtn.addEventListener('click', () => togglePanel('color'));
+	historyToggleBtn.addEventListener('click', () => togglePanel('history'));
+
+	// Pointer input handling (supports mouse, touch, pen)
 	function shouldPanOnPointerDown(e) {
-		// Pan if Space is held or middle mouse button
 		const isMiddleButton = e.button === 1 || (e.pointerType === 'mouse' && (e.buttons & 4) !== 0);
 		return isSpaceDown || isMiddleButton;
 	}
 
-	// Pointer input handling (supports mouse, touch, pen)
 	function onPointerDown(e) {
 		displayCanvas.setPointerCapture(e.pointerId);
 		activePointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
 
-		// PC pan with space/middle mouse
 		if (shouldPanOnPointerDown(e)) {
 			isPanning = true;
 			panPointerId = e.pointerId;
@@ -330,23 +341,14 @@ window.addEventListener('load', () => {
 		}
 
 		if (activePointers.size === 2) {
-			// Start pinch-zoom
 			const [p1, p2] = Array.from(activePointers.values());
 			const dx = p2.clientX - p1.clientX;
 			const dy = p2.clientY - p1.clientY;
 			const centerX = (p1.clientX + p2.clientX) / 2;
 			const centerY = (p1.clientY + p2.clientY) / 2;
-			pinchState = {
-				startDist: Math.hypot(dx, dy),
-				startScale: viewScale,
-				startOffsetX: viewOffsetX,
-				startOffsetY: viewOffsetY,
-				centerX,
-				centerY
-			};
-			drawingPointerId = null; // Cancel any drawing when pinch begins
+			pinchState = { startDist: Math.hypot(dx, dy), startScale: viewScale, startOffsetX: viewOffsetX, startOffsetY: viewOffsetY, centerX, centerY };
+			drawingPointerId = null;
 		} else if (activePointers.size === 1) {
-			// Single pointer: draw or fill
 			const { x, y } = canvasPointFromClient(e.clientX, e.clientY);
 			if (currentTool === 'fill') {
 				const data = { startX: x, startY: y, color: currentColor };
@@ -368,7 +370,6 @@ window.addEventListener('load', () => {
 		if (!activePointers.has(e.pointerId)) return;
 		activePointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
 
-		// Ongoing PC pan
 		if (isPanning && panPointerId === e.pointerId) {
 			const dx = e.clientX - panLastClientX;
 			const dy = e.clientY - panLastClientY;
@@ -382,29 +383,23 @@ window.addEventListener('load', () => {
 		}
 
 		if (activePointers.size >= 2 && pinchState) {
-			// Update pinch-zoom and pan
 			const [p1, p2] = Array.from(activePointers.values());
 			const dx = p2.clientX - p1.clientX;
 			const dy = p2.clientY - p1.clientY;
 			const newDist = Math.hypot(dx, dy);
 			const newCenterX = (p1.clientX + p2.clientX) / 2;
 			const newCenterY = (p1.clientY + p2.clientY) / 2;
-
 			let newScale = clampScale(pinchState.startScale * (newDist / Math.max(1, pinchState.startDist)));
-
-			// Keep the canvas point under the gesture center stable
 			const startCenter = { x: pinchState.centerX, y: pinchState.centerY };
 			const canvasPointX = (startCenter.x - pinchState.startOffsetX) / pinchState.startScale;
 			const canvasPointY = (startCenter.y - pinchState.startOffsetY) / pinchState.startScale;
 			viewScale = newScale;
 			viewOffsetX = newCenterX - canvasPointX * newScale;
 			viewOffsetY = newCenterY - canvasPointY * newScale;
-
 			render();
 			return;
 		}
 
-		// Drawing with single pointer
 		if (isDrawing && drawingPointerId === e.pointerId) {
 			const { x, y } = canvasPointFromClient(e.clientX, e.clientY);
 			const data = { x, y };
@@ -426,14 +421,11 @@ window.addEventListener('load', () => {
 			updateCursor();
 		}
 		activePointers.delete(e.pointerId);
-		if (activePointers.size < 2) {
-			pinchState = null;
-		}
+		if (activePointers.size < 2) { pinchState = null; }
 		e.preventDefault();
 	}
 
 	function onWheel(e) {
-		// Zoom under mouse cursor
 		const rect = displayCanvas.getBoundingClientRect();
 		const xCss = e.clientX - rect.left;
 		const yCss = e.clientY - rect.top;
@@ -448,22 +440,10 @@ window.addEventListener('load', () => {
 		e.preventDefault();
 	}
 
-	function onKeyDown(e) {
-		if (e.code === 'Space') {
-			isSpaceDown = true;
-			updateCursor();
-			e.preventDefault();
-		}
-	}
-	function onKeyUp(e) {
-		if (e.code === 'Space') {
-			isSpaceDown = false;
-			updateCursor();
-			e.preventDefault();
-		}
-	}
+	function onKeyDown(e) { if (e.code === 'Space') { isSpaceDown = true; updateCursor(); e.preventDefault(); } }
+	function onKeyUp(e) { if (e.code === 'Space') { isSpaceDown = false; updateCursor(); e.preventDefault(); } }
 
-	// Setup local user input event listeners
+	// Events
 	window.addEventListener('resize', resizeCanvas);
 	window.addEventListener('keydown', onKeyDown, { passive: false });
 	window.addEventListener('keyup', onKeyUp, { passive: false });
@@ -476,9 +456,9 @@ window.addEventListener('load', () => {
 	brushBtn.addEventListener('click', () => switchTool('brush'));
 	eraserBtn.addEventListener('click', () => switchTool('eraser'));
 	fillBtn.addEventListener('click', () => switchTool('fill'));
-	colorPicker.addEventListener('change', (e) => { currentColor = e.target.value; addColorToPalette(e.target.value); });
-	colorPicker.addEventListener('input', (e) => currentColor = e.target.value);
-	brushSize.addEventListener('input', (e) => currentSize = Number(e.target.value));
+	colorPicker.addEventListener('change', (e) => { currentColor = e.target.value; addColorToPalette(e.target.value); colorSwatch.style.backgroundColor = currentColor; });
+	colorPicker.addEventListener('input', (e) => { currentColor = e.target.value; colorSwatch.style.backgroundColor = currentColor; });
+	brushSize.addEventListener('input', (e) => { currentSize = Number(e.target.value); sizeDot.style.width = sizeDot.style.height = Math.max(8, Math.min(32, currentSize)) + 'px'; });
 
 	undoBtn.addEventListener('click', () => socket.emit('undo'));
 	redoBtn.addEventListener('click', () => socket.emit('redo'));
@@ -490,10 +470,13 @@ window.addEventListener('load', () => {
 		socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
 	});
 
-	// --- 4. Initial Calls on Page Load ---
+	// Initial
 	resizeCanvas();
 	updatePalette();
 	switchTool('brush');
 	render();
 	updateCursor();
+	// reflect current UI state
+	colorSwatch.style.backgroundColor = currentColor;
+	sizeDot.style.width = sizeDot.style.height = Math.max(8, Math.min(32, currentSize)) + 'px';
 });

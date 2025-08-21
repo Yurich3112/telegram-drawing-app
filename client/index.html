@@ -19,31 +19,43 @@
         </div>
 
         <div class="main-content">
-            <div id="toolbar">
-                <div class="tool-section">
-                    <button class="tool active" id="brushBtn" title="Brush"><i class="fa-solid fa-paintbrush"></i></button>
-                    <button class="tool" id="eraserBtn" title="Eraser"><i class="fa-solid fa-eraser"></i></button>
-                    <button class="tool" id="fillBtn" title="Fill (Bucket)"><i class="fa-solid fa-fill-drip"></i></button>
-                </div>
-                <div class="tool-section">
-                    <input type="range" id="brushSize" min="1" max="100" value="10">
-                </div>
-                <div class="tool-section">
-                    <input type="color" id="colorPicker" value="#0000FF">
-                    <div id="color-palette"></div>
-                </div>
-                <div class="tool-section">
-                    <button class="action" id="undoBtn" title="Undo"><i class="fa-solid fa-rotate-left"></i></button>
-                    <button class="action" id="redoBtn" title="Redo"><i class="fa-solid fa-rotate-right"></i></button>
-                    <button class="action" id="clearBtn" title="Clear Canvas"><i class="fa-solid fa-trash"></i></button>
-                </div>
-            </div>
-
-            <!-- NEW: The canvas container is our "viewport" -->
+            <!-- Canvas viewport -->
             <div id="canvas-container">
-                <!-- Visible canvas (no fixed width/height here; JS manages size for DPR) -->
                 <canvas id="drawing-canvas"></canvas>
             </div>
+        </div>
+    </div>
+
+    <!-- Bottom Toolbar -->
+    <div id="bottom-bar">
+        <div id="expansion-panel" class="hidden">
+            <!-- Tools panel -->
+            <div id="panel-tools" class="panel hidden">
+                <button class="tool" id="brushBtn" title="Brush"><i class="fa-solid fa-paintbrush"></i></button>
+                <button class="tool" id="eraserBtn" title="Eraser"><i class="fa-solid fa-eraser"></i></button>
+                <button class="tool" id="fillBtn" title="Fill (Bucket)"><i class="fa-solid fa-fill-drip"></i></button>
+            </div>
+            <!-- Size panel -->
+            <div id="panel-size" class="panel hidden">
+                <input type="range" id="brushSize" min="1" max="100" value="10">
+            </div>
+            <!-- Color panel -->
+            <div id="panel-color" class="panel hidden">
+                <div id="color-palette"></div>
+                <input type="color" id="colorPicker" value="#0000FF">
+            </div>
+            <!-- History panel -->
+            <div id="panel-history" class="panel hidden">
+                <button class="action" id="undoBtn" title="Undo"><i class="fa-solid fa-rotate-left"></i></button>
+                <button class="action" id="redoBtn" title="Redo"><i class="fa-solid fa-rotate-right"></i></button>
+                <button class="action" id="clearBtn" title="Clear Canvas"><i class="fa-solid fa-trash"></i></button>
+            </div>
+        </div>
+        <div id="quick-actions">
+            <button id="toolToggleBtn" class="square" title="Tools"><i class="fa-solid fa-paintbrush"></i></button>
+            <button id="sizeToggleBtn" class="square" title="Size"><span id="sizeDot"></span></button>
+            <button id="colorToggleBtn" class="square" title="Color"><span id="colorSwatch"></span></button>
+            <button id="historyToggleBtn" class="square" title="History"><i class="fa-solid fa-rotate-left"></i></button>
         </div>
     </div>
 
