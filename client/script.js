@@ -690,28 +690,29 @@ window.addEventListener('load', async () => {
 		});
 	}
 
-	async function buildCompressedDataUrl({ maxDim = 1280, maxBytes = 90000 }) {
+	async function buildCompressedDataUrl({ maxDim = 1280, maxBase64Chars = 90000 }) {
 		let canvasToUse = scaleCanvas(drawingCanvas, maxDim);
-		let bestBlob = null;
-		for (let attempt = 0; attempt < 3; attempt++) {
-			for (let q = 0.9; q >= 0.5; q -= 0.1) {
-				// Prefer JPEG for better compression of drawings; fall back to PNG if needed
+		let bestDataUrl = null;
+		for (let attempt = 0; attempt < 6; attempt++) {
+			for (let q = 0.9; q >= 0.3; q -= 0.1) {
 				const blob = await canvasToBlob(canvasToUse, 'image/jpeg', Math.max(0.1, Math.min(0.95, q)));
-				if (!bestBlob || blob.size < bestBlob.size) bestBlob = blob;
-				if (blob.size <= maxBytes) {
-					return await blobToDataUrl(blob);
+				const dataUrl = await blobToDataUrl(blob);
+				if (!bestDataUrl || dataUrl.length < bestDataUrl.length) bestDataUrl = dataUrl;
+				if (dataUrl.length <= maxBase64Chars) {
+					return dataUrl;
 				}
 			}
 			// If still too large, scale down further and retry
-			canvasToUse = scaleCanvas(canvasToUse, Math.max(256, Math.floor(Math.max(canvasToUse.width, canvasToUse.height) * 0.8)));
+			const nextMax = Math.max(128, Math.floor(Math.max(canvasToUse.width, canvasToUse.height) * 0.7));
+			canvasToUse = scaleCanvas(canvasToUse, nextMax);
 		}
-		// Could not get under target; return best effort
-		return await blobToDataUrl(bestBlob);
+		return bestDataUrl;
 	}
 
 	saveBtn.addEventListener('click', async () => {
 		try {
-			const dataUrl = await buildCompressedDataUrl({ maxDim: 1280, maxBytes: 90000 });
+			saveBtn.disabled = true; saveBtn.style.opacity = '0.7';
+			const dataUrl = await buildCompressedDataUrl({ maxDim: 1024, maxBase64Chars: 45000 });
 			await fetch('/api/send-canvas', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
@@ -722,7 +723,7 @@ window.addEventListener('load', async () => {
 			}
 		} catch (err) {
 			console.error('Failed to send image', err);
-		}
+		} finally { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
 	});
 
 	clearBtn.addEventListener('click', () => {
