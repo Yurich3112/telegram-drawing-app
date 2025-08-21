@@ -17,6 +17,10 @@ window.addEventListener('load', async () => {
 		if (startParam && startParam.startsWith('r_')) {
 			room = decodeURIComponent(startParam.slice(2));
 		}
+		// Fallback to chat.id when opened inside a group
+		if (!room && initDataUnsafe && initDataUnsafe.chat && initDataUnsafe.chat.id) {
+			room = String(initDataUnsafe.chat.id);
+		}
 		// Fallback to user chat id in private chats
 		if (!room && initDataUnsafe && initDataUnsafe.user && initDataUnsafe.user.id) {
 			room = String(initDataUnsafe.user.id);
