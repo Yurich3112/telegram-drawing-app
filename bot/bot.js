@@ -38,11 +38,10 @@ function makeStartAppPayload(room) {
 bot.onText(/^\/start(?:\s+(.*))?$/, (msg, match) => {
     const chatId = msg.chat.id.toString();
     if (msg.chat.type !== 'private') return;
-    // By default open personal room in private chat
     const room = chatId;
     const url = makeAppUrl(room);
-    const options = { reply_markup: { inline_keyboard: [[{ text: '🎨 Open Here', web_app: { url } }]] } };
-    bot.sendMessage(chatId, 'Launch canvas:', options).catch(console.error);
+    const text = `Tap to open your canvas: <a href="${url}">Open here</a>`;
+    bot.sendMessage(chatId, text, { parse_mode: 'HTML', disable_web_page_preview: true }).catch(console.error);
 });
 
 bot.onText(/^\/draw(?:@\w+)?$/, async (msg) => {
@@ -52,14 +51,14 @@ bot.onText(/^\/draw(?:@\w+)?$/, async (msg) => {
 
     if (isPrivate) {
         const url = makeAppUrl(chatId);
-        const options = { reply_markup: { inline_keyboard: [[{ text: '🎨 Open Here', web_app: { url } }]] } };
-        bot.sendMessage(chatId, 'Tap to open your canvas.', options).catch(console.error);
+        const text = `Tap to open your canvas: <a href="${url}">Open here</a>`;
+        bot.sendMessage(chatId, text, { parse_mode: 'HTML', disable_web_page_preview: true }).catch(console.error);
         return;
     }
 
-    // Group: send canonical startapp link
     const me = await bot.getMe();
     const startapp = makeStartAppPayload(chatId);
     const startAppLink = `https://t.me/${me.username}?startapp=${startapp}`;
-    bot.sendMessage(chatId, `Launch Mini App: ${startAppLink}`).catch(console.error);
+    const text = `Launch Mini App: <a href="${startAppLink}">Open here</a>`;
+    bot.sendMessage(chatId, text, { parse_mode: 'HTML', disable_web_page_preview: true }).catch(console.error);
 });
