@@ -25,7 +25,7 @@ const rooms = new Map();
 
 function getRoomState(roomId) {
   if (!rooms.has(roomId)) {
-    rooms.set(roomId, { history: [], historyStep: -1, activeUsers: new Map(), activeStrokes: new Map() });
+    rooms.set(roomId, { history: [], historyStep: -1, activeUsers: new Map() });
   }
   return rooms.get(roomId);
 }
@@ -58,34 +58,9 @@ io.on('connection', (socket) => {
     if (state.historyStep >= 0) socket.emit('loadCanvas', { dataUrl: state.history[state.historyStep] });
   });
 
-  // Buffer per-user strokes on server and emit a single commit at stop
-  socket.on('startDrawing', (data = {}) => {
-    const payload = { ...data, senderId: data.senderId || socket.id };
-    const s = state.activeStrokes;
-    s.set(socket.id, {
-      senderId: payload.senderId,
-      tool: payload.tool,
-      color: payload.color,
-      size: payload.size,
-      points: [{ x: payload.x, y: payload.y }]
-    });
-  });
-  socket.on('draw', (data = {}) => {
-    const s = state.activeStrokes;
-    const buf = s.get(socket.id);
-    if (buf && data && typeof data.x === 'number' && typeof data.y === 'number') {
-      buf.points.push({ x: data.x, y: data.y });
-    }
-  });
-  socket.on('stopDrawing', (data = {}) => {
-    const s = state.activeStrokes;
-    const buf = s.get(socket.id);
-    if (buf && Array.isArray(buf.points) && buf.points.length) {
-      const commit = { senderId: buf.senderId, tool: buf.tool, color: buf.color, size: buf.size, points: buf.points };
-      socket.to(room).emit('commitStroke', commit);
-    }
-    s.delete(socket.id);
-  });
+  socket.on('startDrawing', (data) => socket.to(room).emit('startDrawing', data));
+  socket.on('draw', (data) => socket.to(room).emit('draw', data));
+  socket.on('stopDrawing', () => socket.to(room).emit('stopDrawing'));
   socket.on('fill', (data) => socket.to(room).emit('fill', data));
   socket.on('clearCanvas', () => socket.to(room).emit('clearCanvas'));
 
