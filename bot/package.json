@@ -1,8 +1,9 @@
 {
   "name": "bot",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "bot.js",
   "scripts": {
+    "start": "node bot.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -10,7 +11,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "dotenv": "^17.2.1",
+    "dotenv": "^16.4.5",
     "node-telegram-bot-api": "^0.66.0"
   }
 }
