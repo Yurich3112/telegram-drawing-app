@@ -1,9 +1,10 @@
 {
   "name": "telegram-drawing-app",
   "version": "1.0.0",
+  "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "concurrently \"npm --prefix server start\" \"npm --prefix bot start\"",
+    "start": "npx concurrently \"npm --prefix server start\" \"npm --prefix bot start\"",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -17,7 +18,6 @@
     "url": "https://github.com/Yurich3112/telegram-drawing-app/issues"
   },
   "homepage": "https://github.com/Yurich3112/telegram-drawing-app#readme",
-  "description": "",
   "dependencies": {
     "concurrently": "^9.2.0"
   }
