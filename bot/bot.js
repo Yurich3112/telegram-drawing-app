@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const sharedSecret = process.env.SHARED_SECRET_KEY; // unused now, kept for future
 const appUrl = process.env.APP_BASE_URL;
-const directLinkSlug = process.env.BOT_DIRECT_LINK_SLUG || 'draw';
+const directLinkSlug = process.env.APP_DIRECT_LINK_SLUG || 'draw'; // BotFather Direct Link path
 
 if (!token || !appUrl) {
     console.error("Missing critical environment variables. Check your .env file.");
@@ -57,13 +57,11 @@ bot.onText(/^\/draw(?:@\w+)?$/, async (msg) => {
         return;
     }
 
+    // Group: send startapp link using the configured direct-link slug to show a rich preview card
     const me = await bot.getMe();
     const startapp = makeStartAppPayload(chatId);
-    const startAppLink = directLinkSlug
-        ? `https://t.me/${me.username}/${directLinkSlug}?startapp=${startapp}`
-        : `https://t.me/${me.username}?startapp=${startapp}`;
-
-    // Put the URL plainly in the message to trigger Telegram preview card
-    const text = `Launch Mini App:\n${startAppLink}`;
+    const startAppLink = `https://t.me/${me.username}/${directLinkSlug}?startapp=${startapp}`;
+    // Send as plain text so Telegram renders the preview card
+    const text = `Launch Mini App: ${startAppLink}`;
     bot.sendMessage(chatId, text, { disable_web_page_preview: false }).catch(console.error);
 });
