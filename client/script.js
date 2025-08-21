@@ -206,12 +206,13 @@ window.addEventListener('load', async () => {
 	}
 
 	function handleStartDrawing(data) {
-		ctx.globalCompositeOperation = data.tool === 'eraser' ? 'destination-out' : 'source-over';
+		const isEraser = data.tool === 'eraser';
+		ctx.globalCompositeOperation = 'source-over';
 		ctx.beginPath();
 		ctx.lineCap = 'round';
 		ctx.lineJoin = 'round';
 		ctx.lineWidth = data.size;
-		ctx.strokeStyle = data.color;
+		ctx.strokeStyle = isEraser ? '#ffffff' : data.color;
 		[lastX, lastY] = [data.x, data.y];
 		ctx.moveTo(lastX, lastY);
 		ctx.lineTo(lastX, lastY);
@@ -245,45 +246,95 @@ window.addEventListener('load', async () => {
 
 	function floodFill({ startX, startY, color }) {
 		const tolerance = 32;
-		const imageData = ctx.getImageData(0, 0, drawingCanvas.width, drawingCanvas.height);
+		const width = drawingCanvas.width;
+		const height = drawingCanvas.height;
+		const imageData = ctx.getImageData(0, 0, width, height);
 		const data = imageData.data;
-		const startIdx = (Math.floor(startY) * drawingCanvas.width + Math.floor(startX)) * 4;
-		const targetColor = [data[startIdx], data[startIdx + 1], data[startIdx + 2]];
+		const sx = Math.floor(startX);
+		const sy = Math.floor(startY);
+		if (sx < 0 || sx >= width || sy < 0 || sy >= height) return;
+		const startIdx = (sy * width + sx) * 4;
+		const targetR = data[startIdx];
+		const targetG = data[startIdx + 1];
+		const targetB = data[startIdx + 2];
 		const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(color);
 		if (!result) return;
-		const fillColorRgb = [parseInt(result[1], 16), parseInt(result[2], 16), parseInt(result[3], 16)];
-		if (targetColor.join(',') === fillColorRgb.join(',')) return;
-		function colorsMatch(idx) {
-			const rDiff = data[idx] - targetColor[0];
-			const gDiff = data[idx + 1] - targetColor[1];
-			const bDiff = data[idx + 2] - targetColor[2];
-			return (rDiff * rDiff + gDiff * gDiff + bDiff * bDiff) < tolerance * tolerance;
+		const fillR = parseInt(result[1], 16);
+		const fillG = parseInt(result[2], 16);
+		const fillB = parseInt(result[3], 16);
+		if (targetR === fillR && targetG === fillG && targetB === fillB) return;
+		const tolSq = tolerance * tolerance;
+		function matchesAt(x, y) {
+			const i = (y * width + x) * 4;
+			const rDiff = data[i] - targetR;
+			const gDiff = data[i + 1] - targetG;
+			const bDiff = data[i + 2] - targetB;
+			return (rDiff * rDiff + gDiff * gDiff + bDiff * bDiff) < tolSq;
 		}
 		const tempCanvas = document.createElement('canvas');
-		tempCanvas.width = drawingCanvas.width;
-		tempCanvas.height = drawingCanvas.height;
+		tempCanvas.width = width;
+		tempCanvas.height = height;
 		const tempCtx = tempCanvas.getContext('2d');
-		const maskData = tempCtx.createImageData(drawingCanvas.width, drawingCanvas.height);
-		const visited = new Set();
-		const queue = [[Math.floor(startX), Math.floor(startY)]];
-		visited.add(`${Math.floor(startX)},${Math.floor(startY)}`);
-		while (queue.length > 0) {
-			const [x, y] = queue.shift();
-			const idx = (y * drawingCanvas.width + x) * 4;
-			maskData.data[idx + 3] = 255;
-			const neighbors = [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]];
-			for (const [nx, ny] of neighbors) {
-				const key = `${nx},${ny}`;
-				if (nx >= 0 && nx < drawingCanvas.width && ny >= 0 && ny < drawingCanvas.height && !visited.has(key)) {
-					visited.add(key);
-					if (colorsMatch((ny * drawingCanvas.width + nx) * 4)) queue.push([nx, ny]);
+		const maskData = tempCtx.createImageData(width, height);
+		const mask = maskData.data;
+		const visited = new Uint8Array(width * height);
+		const stack = [[sx, sy]];
+		visited[sy * width + sx] = 1;
+
+		while (stack.length) {
+			const [x, y] = stack.pop();
+			// find left bound
+			let xL = x;
+			while (xL - 1 >= 0 && !visited[y * width + (xL - 1)] && matchesAt(xL - 1, y)) {
+				xL--;
+			}
+			// find right bound
+			let xR = x;
+			while (xR + 1 < width && !visited[y * width + (xR + 1)] && matchesAt(xR + 1, y)) {
+				xR++;
+			}
+			// fill the scanline and enqueue spans above and below
+			for (let xi = xL; xi <= xR; xi++) {
+				const idx = y * width + xi;
+				visited[idx] = 1;
+				mask[idx * 4 + 3] = 255; // set alpha in mask
+			}
+			// check the line above
+			if (y - 1 >= 0) {
+				let inSpan = false;
+				for (let xi = xL; xi <= xR; xi++) {
+					const idx = (y - 1) * width + xi;
+					if (!visited[idx] && matchesAt(xi, y - 1)) {
+						if (!inSpan) {
+							stack.push([xi, y - 1]);
+							inSpan = true;
+						}
+					} else if (inSpan) {
+						inSpan = false;
+					}
+				}
+			}
+			// check the line below
+			if (y + 1 < height) {
+				let inSpan = false;
+				for (let xi = xL; xi <= xR; xi++) {
+					const idx = (y + 1) * width + xi;
+					if (!visited[idx] && matchesAt(xi, y + 1)) {
+						if (!inSpan) {
+							stack.push([xi, y + 1]);
+							inSpan = true;
+						}
+					} else if (inSpan) {
+						inSpan = false;
+					}
 				}
 			}
 		}
+
 		tempCtx.putImageData(maskData, 0, 0);
 		tempCtx.globalCompositeOperation = 'source-in';
 		tempCtx.fillStyle = color;
-		tempCtx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+		tempCtx.fillRect(0, 0, width, height);
 		ctx.drawImage(tempCanvas, 0, 0);
 		render();
 	}
