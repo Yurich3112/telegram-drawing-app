@@ -2,8 +2,17 @@ window.addEventListener('load', () => {
 	// Tell the Telegram client that the app is ready.
 	window.Telegram.WebApp.ready();
 
-	// Socket connection
-	const socket = io('https://our-drawing-app-server.onrender.com');
+	// Parse room and token from URL
+	const params = new URLSearchParams(window.location.search);
+	const room = params.get('room');
+	const token = params.get('token');
+	if (!room || !token) {
+		alert('Missing access parameters. Please open the app from the Telegram bot button.');
+		return;
+	}
+
+	// Socket connection with auth
+	const socket = io('https://our-drawing-app-server.onrender.com', { auth: { room, token } });
 
 	// --- Modal and User List Elements ---
 	const signatureModal = document.getElementById('signature-modal');
