@@ -145,6 +145,8 @@ window.addEventListener('load', async () => {
 	const activePointers = new Map();
 	let drawingPointerId = null;
 	let pinchState = null;
+	// Track remote users' stroke state to avoid cross-user jumps
+	const remoteStrokes = new Map(); // senderId -> { lastX, lastY, tool, color, size, active }
 
 	// PC pan state
 	let isSpaceDown = false;
@@ -221,6 +223,46 @@ window.addEventListener('load', async () => {
 		ctx.lineTo(lastX, lastY);
 		ctx.stroke();
 		render();
+	}
+
+	// Remote drawing handlers keep per-sender state to prevent jumps between users
+	function remoteHandleStartDrawing(senderId, data) {
+		const isEraser = data.tool === 'eraser';
+		ctx.globalCompositeOperation = 'source-over';
+		ctx.beginPath();
+		ctx.lineCap = 'round';
+		ctx.lineJoin = 'round';
+		ctx.lineWidth = data.size;
+		ctx.strokeStyle = isEraser ? '#ffffff' : data.color;
+		ctx.moveTo(data.x, data.y);
+		ctx.lineTo(data.x, data.y);
+		ctx.stroke();
+		remoteStrokes.set(senderId, { lastX: data.x, lastY: data.y, tool: data.tool, color: data.color, size: data.size, active: true });
+		render();
+	}
+
+	function remoteHandleDraw(senderId, data) {
+		const state = remoteStrokes.get(senderId);
+		if (!state || !state.active) return;
+		const isEraser = state.tool === 'eraser';
+		ctx.globalCompositeOperation = 'source-over';
+		ctx.lineCap = 'round';
+		ctx.lineJoin = 'round';
+		ctx.lineWidth = state.size;
+		ctx.strokeStyle = isEraser ? '#ffffff' : state.color;
+		const midX = (state.lastX + data.x) / 2;
+		const midY = (state.lastY + data.y) / 2;
+		ctx.quadraticCurveTo(state.lastX, state.lastY, midX, midY);
+		ctx.stroke();
+		state.lastX = data.x;
+		state.lastY = data.y;
+		render();
+	}
+
+	function remoteHandleStopDrawing(senderId) {
+		const state = remoteStrokes.get(senderId);
+		if (state) state.active = false;
+		ctx.beginPath();
 	}
 
 	function handleDraw(data) {
@@ -396,9 +438,18 @@ window.addEventListener('load', async () => {
 	}
 
 	// Socket events
-	socket.on('startDrawing', (data) => { handleStartDrawing(data); });
-	socket.on('draw', (data) => { handleDraw(data); });
-	socket.on('stopDrawing', () => { handleStopDrawing(); });
+	socket.on('startDrawing', (data) => {
+		if (data && data.senderId && data.senderId !== socket.id) { remoteHandleStartDrawing(data.senderId, data); return; }
+		handleStartDrawing(data);
+	});
+	socket.on('draw', (data) => {
+		if (data && data.senderId && data.senderId !== socket.id) { remoteHandleDraw(data.senderId, data); return; }
+		handleDraw(data);
+	});
+	socket.on('stopDrawing', (data) => {
+		if (data && data.senderId && data.senderId !== socket.id) { remoteHandleStopDrawing(data.senderId); return; }
+		handleStopDrawing();
+	});
 	socket.on('fill', (data) => { floodFill(data); });
 	socket.on('clearCanvas', () => { ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height); render(); });
 
@@ -457,7 +508,7 @@ window.addEventListener('load', async () => {
 	function beginStroke(data) {
 		strokeStarted = true;
 		handleStartDrawing(data);
-		socket.emit('startDrawing', data);
+		socket.emit('startDrawing', { ...data, senderId: socket.id });
 	}
 
 	function onPointerDown(e) {
@@ -552,7 +603,7 @@ window.addEventListener('load', async () => {
 			if (strokeStarted) {
 				const data = { x, y };
 				handleDraw(data);
-				socket.emit('draw', data);
+				socket.emit('draw', { ...data, senderId: socket.id });
 			}
 		}
 		e.preventDefault();
@@ -576,11 +627,11 @@ window.addEventListener('load', async () => {
 			if (!strokeStarted && pendingStroke) {
 				beginStroke(pendingStroke);
 				handleStopDrawing();
-				socket.emit('stopDrawing');
+				socket.emit('stopDrawing', { senderId: socket.id });
 				socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
 			} else if (strokeStarted) {
 				isDrawing = false;
-				socket.emit('stopDrawing');
+				socket.emit('stopDrawing', { senderId: socket.id });
 				socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
 			}
 		}
