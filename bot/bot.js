@@ -26,30 +26,32 @@ bot.on('polling_error', (err) => {
 
 console.log("🤖 Bot is running and waiting for commands...");
 
-bot.onText(/\/draw/, (msg) => {
+// Match /draw with optional @Bot mention
+bot.onText(/^\/draw(?:@\w+)?$/, (msg) => {
     const chatId = msg.chat.id.toString();
-    console.log(`Received /draw command from chat ID: ${chatId}`);
+    const chatType = msg.chat.type; // private, group, supergroup, channel
+    console.log(`Received /draw in chat ${chatId} (type=${chatType})`);
 
     const secureToken = crypto.createHash('sha256').update(chatId + sharedSecret).digest('hex');
-    const privateUrl = `${appUrl}/?room=${chatId}&token=${secureToken}`;
+    const privateUrl = `${appUrl}/?room=${encodeURIComponent(chatId)}&token=${secureToken}`;
     console.log(`Generated Mini App URL: ${privateUrl}`);
 
-    // --- THE KEY CHANGE IS HERE ---
-    const options = {
-        reply_markup: {
-            inline_keyboard: [
-                [
-                    {
-                        text: '🎨 Open Drawing Canvas!',
-                        // Instead of a 'url' field, we use a 'web_app' object
-                        web_app: {
-                            url: privateUrl
-                        }
-                    }
-                ]
-            ]
-        }
-    };
+    const inlineKeyboard = [
+        [
+            // Open inside Telegram (web_app)
+            {
+                text: '🎨 Open Here',
+                web_app: { url: privateUrl }
+            },
+            // Fallback: open in external browser
+            {
+                text: '🌐 Open in Browser',
+                url: privateUrl
+            }
+        ]
+    ];
 
-    bot.sendMessage(chatId, "Click the button below to open our shared canvas inside Telegram:", options);
+    const options = { reply_markup: { inline_keyboard: inlineKeyboard } };
+
+    bot.sendMessage(chatId, "Tap a button to open your shared canvas.", options).catch(err => console.error('sendMessage error:', err));
 });
