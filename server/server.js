@@ -20,15 +20,14 @@ function computeToken(room) {
   return crypto.createHash('sha256').update(String(room) + SHARED_SECRET_KEY).digest('hex');
 }
 
-// Serve client with verification on root path
-app.get('/', (req, res, next) => {
+// Serve client (allow without query so Mini App can load); if query is present and invalid, reject
+app.get('/', (req, res) => {
   const { room, token } = req.query;
-  if (!room || !token) {
-    return res.status(403).send('Forbidden: missing credentials');
-  }
-  const expected = computeToken(room);
-  if (token !== expected) {
-    return res.status(403).send('Forbidden: invalid token');
+  if (room || token) {
+    const expected = room ? computeToken(room) : '';
+    if (!room || !token || token !== expected) {
+      return res.status(403).send('Forbidden: invalid token');
+    }
   }
   return res.sendFile(path.join(__dirname, '..', 'client', 'index.html'));
 });
@@ -37,7 +36,6 @@ app.get('/', (req, res, next) => {
 app.use(express.static(path.join(__dirname, '..', 'client')));
 
 // In-memory per-room state
-// rooms: Map<roomId, { history: string[], historyStep: number, activeUsers: Map<socketId, signature> }>
 const rooms = new Map();
 
 function getRoomState(roomId) {
@@ -65,12 +63,10 @@ io.on('connection', (socket) => {
   socket.join(room);
   console.log(`Socket ${socket.id} joined room ${room}`);
 
-  // Send current canvas state to the new user
   if (state.historyStep >= 0) {
     socket.emit('loadCanvas', { dataUrl: state.history[state.historyStep] });
   }
 
-  // User signature handling (per room)
   socket.on('userSignedUp', ({ signature }) => {
     state.activeUsers.set(socket.id, signature);
     io.to(room).emit('updateUserList', Array.from(state.activeUsers.values()));
@@ -80,7 +76,6 @@ io.on('connection', (socket) => {
     if (state.historyStep >= 0) socket.emit('loadCanvas', { dataUrl: state.history[state.historyStep] });
   });
 
-  // Drawing events scoped to room
   socket.on('startDrawing', (data) => socket.to(room).emit('startDrawing', data));
   socket.on('draw', (data) => socket.to(room).emit('draw', data));
   socket.on('stopDrawing', () => socket.to(room).emit('stopDrawing'));
