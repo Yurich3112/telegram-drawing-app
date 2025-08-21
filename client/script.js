@@ -661,9 +661,57 @@ window.addEventListener('load', async () => {
 	undoBtn.addEventListener('click', () => socket.emit('undo'));
 	redoBtn.addEventListener('click', () => socket.emit('redo'));
 
+	// --- Save helpers to keep payload under server limits ---
+	function scaleCanvas(sourceCanvas, maxDim) {
+		const w = sourceCanvas.width;
+		const h = sourceCanvas.height;
+		const scale = Math.min(1, maxDim / Math.max(w, h));
+		if (scale >= 1) return sourceCanvas;
+		const c = document.createElement('canvas');
+		c.width = Math.max(1, Math.round(w * scale));
+		c.height = Math.max(1, Math.round(h * scale));
+		const cctx = c.getContext('2d');
+		cctx.imageSmoothingEnabled = true;
+		cctx.imageSmoothingQuality = 'high';
+		cctx.drawImage(sourceCanvas, 0, 0, c.width, c.height);
+		return c;
+	}
+
+	function canvasToBlob(canvas, type, quality) {
+		return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+	}
+
+	function blobToDataUrl(blob) {
+		return new Promise((resolve, reject) => {
+			const fr = new FileReader();
+			fr.onload = () => resolve(fr.result);
+			fr.onerror = reject;
+			fr.readAsDataURL(blob);
+		});
+	}
+
+	async function buildCompressedDataUrl({ maxDim = 1280, maxBytes = 90000 }) {
+		let canvasToUse = scaleCanvas(drawingCanvas, maxDim);
+		let bestBlob = null;
+		for (let attempt = 0; attempt < 3; attempt++) {
+			for (let q = 0.9; q >= 0.5; q -= 0.1) {
+				// Prefer JPEG for better compression of drawings; fall back to PNG if needed
+				const blob = await canvasToBlob(canvasToUse, 'image/jpeg', Math.max(0.1, Math.min(0.95, q)));
+				if (!bestBlob || blob.size < bestBlob.size) bestBlob = blob;
+				if (blob.size <= maxBytes) {
+					return await blobToDataUrl(blob);
+				}
+			}
+			// If still too large, scale down further and retry
+			canvasToUse = scaleCanvas(canvasToUse, Math.max(256, Math.floor(Math.max(canvasToUse.width, canvasToUse.height) * 0.8)));
+		}
+		// Could not get under target; return best effort
+		return await blobToDataUrl(bestBlob);
+	}
+
 	saveBtn.addEventListener('click', async () => {
 		try {
-			const dataUrl = drawingCanvas.toDataURL('image/png');
+			const dataUrl = await buildCompressedDataUrl({ maxDim: 1280, maxBytes: 90000 });
 			await fetch('/api/send-canvas', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
