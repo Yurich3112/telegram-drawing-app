@@ -11,7 +11,18 @@ if (!token || !sharedSecret || !appUrl) {
     process.exit(1);
 }
 
+process.title = 'telegram-drawing-bot';
+
 const bot = new TelegramBot(token, { polling: true });
+
+// Exit fast if another instance is polling
+bot.on('polling_error', (err) => {
+    console.error('[polling_error]', err);
+    if (err && err.code === 'ETELEGRAM' && /409/.test(String(err.message))) {
+        console.error('Another instance is polling this bot. Exiting to prevent conflicts.');
+        process.exit(1);
+    }
+});
 
 console.log("🤖 Bot is running and waiting for commands...");
 
