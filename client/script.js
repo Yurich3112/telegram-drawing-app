@@ -2,32 +2,51 @@ window.addEventListener('load', async () => {
 	// Tell the Telegram client that the app is ready.
 	window.Telegram.WebApp.ready();
 
-	// Parse room from URL or derive via Telegram WebApp initData (no token)
+	// Parse room and token from URL or derive via Telegram WebApp initData
 	const params = new URLSearchParams(window.location.search);
 	let room = params.get('room');
+	let token = params.get('token');
 
-	if (!room) {
+	// If missing, try to derive from start/startapp and server token issuer
+	if (!room || !token) {
 		const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+		const initData = tg ? tg.initData : '';
 		const initDataUnsafe = tg ? tg.initDataUnsafe : {};
+		// start_param can carry r_<room>
 		const startParam = (initDataUnsafe && initDataUnsafe.start_param) ? initDataUnsafe.start_param : null;
 		if (startParam && startParam.startsWith('r_')) {
 			room = decodeURIComponent(startParam.slice(2));
 		}
+		// Fallback to chat.id when opened inside a group
 		if (!room && initDataUnsafe && initDataUnsafe.chat && initDataUnsafe.chat.id) {
 			room = String(initDataUnsafe.chat.id);
 		}
+		// Fallback to user chat id in private chats
 		if (!room && initDataUnsafe && initDataUnsafe.user && initDataUnsafe.user.id) {
 			room = String(initDataUnsafe.user.id);
 		}
+		if (room && initData) {
+			try {
+				const res = await fetch('/api/issue-token', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ room, initData })
+				});
+				if (res.ok) {
+					const json = await res.json();
+					token = json.token;
+				}
+			} catch (e) { /* ignore */ }
+		}
 	}
 
-	if (!room) {
-		alert('Missing room parameter. Please open the app from the bot button.');
+	if (!room || !token) {
+		alert('Missing access parameters. Please open the app from the Telegram bot button.');
 		return;
 	}
 
-	// Socket connection with auth (room only)
-	const socket = io('https://our-drawing-app-server.onrender.com', { auth: { room } });
+	// Socket connection with auth
+	const socket = io('https://our-drawing-app-server.onrender.com', { auth: { room, token } });
 
 	// --- Modal and User List Elements ---
 	const signatureModal = document.getElementById('signature-modal');
