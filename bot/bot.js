@@ -30,28 +30,26 @@ console.log("🤖 Bot is running and waiting for commands...");
 bot.onText(/^\/draw(?:@\w+)?$/, (msg) => {
     const chatId = msg.chat.id.toString();
     const chatType = msg.chat.type; // private, group, supergroup, channel
+    const isPrivate = chatType === 'private';
     console.log(`Received /draw in chat ${chatId} (type=${chatType})`);
 
     const secureToken = crypto.createHash('sha256').update(chatId + sharedSecret).digest('hex');
-    const privateUrl = `${appUrl}/?room=${encodeURIComponent(chatId)}&token=${secureToken}`;
+    const base = appUrl.replace(/\/+$/, ''); // remove trailing slashes
+    const privateUrl = `${base}/?room=${encodeURIComponent(chatId)}&token=${secureToken}`;
     console.log(`Generated Mini App URL: ${privateUrl}`);
 
-    const inlineKeyboard = [
-        [
-            // Open inside Telegram (web_app)
-            {
-                text: '🎨 Open Here',
-                web_app: { url: privateUrl }
-            },
-            // Fallback: open in external browser
-            {
-                text: '🌐 Open in Browser',
-                url: privateUrl
-            }
-        ]
-    ];
+    // In groups, Telegram API forbids web_app buttons in inline keyboards → use URL button only
+    const inlineKeyboard = isPrivate
+        ? [[
+            { text: '🎨 Open Here', web_app: { url: privateUrl } },
+            { text: '🌐 Open in Browser', url: privateUrl }
+          ]]
+        : [[
+            { text: '🌐 Open Canvas', url: privateUrl }
+          ]];
 
     const options = { reply_markup: { inline_keyboard: inlineKeyboard } };
 
-    bot.sendMessage(chatId, "Tap a button to open your shared canvas.", options).catch(err => console.error('sendMessage error:', err));
+    bot.sendMessage(chatId, isPrivate ? 'Tap a button to open your shared canvas.' : 'Tap to open your chat canvas in the browser.', options)
+       .catch(err => console.error('sendMessage error:', err));
 });
