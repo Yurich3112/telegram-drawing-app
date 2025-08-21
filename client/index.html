@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <!-- Updated viewport tag to disable user scaling, as we handle it ourselves -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Collaborative Drawing App</title>
 
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -13,14 +14,12 @@
 <body>
 
     <div class="app-container">
-        <!-- Add a placeholder message here -->
         <div id="user-list">
             <h3>Connecting...</h3>
         </div>
 
         <div class="main-content">
             <div id="toolbar">
-                <!-- (Toolbar content is the same) -->
                 <div class="tool-section">
                     <button class="tool active" id="brushBtn" title="Brush"><i class="fa-solid fa-paintbrush"></i></button>
                     <button class="tool" id="eraserBtn" title="Eraser"><i class="fa-solid fa-eraser"></i></button>
@@ -41,12 +40,16 @@
                     <button class="action" id="clearBtn" title="Clear Canvas"><i class="fa-solid fa-trash"></i></button>
                 </div>
             </div>
-            <canvas id="drawing-canvas"></canvas>
+
+            <!-- NEW: The canvas container is our "viewport" -->
+            <div id="canvas-container">
+                <!-- Visible canvas (no fixed width/height here; JS manages size for DPR) -->
+                <canvas id="drawing-canvas"></canvas>
+            </div>
         </div>
     </div>
 
     <div id="signature-modal">
-        <!-- (Modal content is the same) -->
         <div class="modal-content">
             <h2>Draw your signature to join</h2>
             <canvas id="signature-canvas" width="400" height="200"></canvas>
