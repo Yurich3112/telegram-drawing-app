@@ -76,30 +76,6 @@ window.addEventListener('load', async () => {
 	const fillBtn = document.getElementById('fillBtn');
 	const paletteContainer = document.getElementById('color-palette');
 
-	// Floating Save button (top-right) that persists regardless of signatures/modal
-	const saveBtn = document.createElement('button');
-	saveBtn.setAttribute('aria-label', 'Save canvas to chat');
-	saveBtn.title = 'Save';
-	saveBtn.textContent = '💾';
-	saveBtn.style.position = 'fixed';
-	saveBtn.style.top = '10px';
-	saveBtn.style.right = '10px';
-	saveBtn.style.width = '44px';
-	saveBtn.style.height = '44px';
-	saveBtn.style.borderRadius = '12px';
-	saveBtn.style.border = 'none';
-	saveBtn.style.background = '#2c3e50';
-	saveBtn.style.color = '#fff';
-	saveBtn.style.fontSize = '22px';
-	saveBtn.style.lineHeight = '44px';
-	saveBtn.style.textAlign = 'center';
-	saveBtn.style.cursor = 'pointer';
-	saveBtn.style.zIndex = '10000';
-	saveBtn.style.boxShadow = '0 2px 8px rgba(0,0,0,0.35)';
-	saveBtn.style.userSelect = 'none';
-	// Ensure button does not get hidden by modal overlays
-	document.body.appendChild(saveBtn);
-
 	// --- Signature Pad Logic ---
 	let isSigDrawing = false;
 	let lastSigX = 0;
@@ -660,71 +636,6 @@ window.addEventListener('load', async () => {
 
 	undoBtn.addEventListener('click', () => socket.emit('undo'));
 	redoBtn.addEventListener('click', () => socket.emit('redo'));
-
-	// --- Save helpers to keep payload under server limits ---
-	function scaleCanvas(sourceCanvas, maxDim) {
-		const w = sourceCanvas.width;
-		const h = sourceCanvas.height;
-		const scale = Math.min(1, maxDim / Math.max(w, h));
-		if (scale >= 1) return sourceCanvas;
-		const c = document.createElement('canvas');
-		c.width = Math.max(1, Math.round(w * scale));
-		c.height = Math.max(1, Math.round(h * scale));
-		const cctx = c.getContext('2d');
-		cctx.imageSmoothingEnabled = true;
-		cctx.imageSmoothingQuality = 'high';
-		cctx.drawImage(sourceCanvas, 0, 0, c.width, c.height);
-		return c;
-	}
-
-	function canvasToBlob(canvas, type, quality) {
-		return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
-	}
-
-	function blobToDataUrl(blob) {
-		return new Promise((resolve, reject) => {
-			const fr = new FileReader();
-			fr.onload = () => resolve(fr.result);
-			fr.onerror = reject;
-			fr.readAsDataURL(blob);
-		});
-	}
-
-	async function buildCompressedDataUrl({ maxDim = 1280, maxBase64Chars = 90000 }) {
-		let canvasToUse = scaleCanvas(drawingCanvas, maxDim);
-		let bestDataUrl = null;
-		for (let attempt = 0; attempt < 6; attempt++) {
-			for (let q = 0.9; q >= 0.3; q -= 0.1) {
-				const blob = await canvasToBlob(canvasToUse, 'image/jpeg', Math.max(0.1, Math.min(0.95, q)));
-				const dataUrl = await blobToDataUrl(blob);
-				if (!bestDataUrl || dataUrl.length < bestDataUrl.length) bestDataUrl = dataUrl;
-				if (dataUrl.length <= maxBase64Chars) {
-					return dataUrl;
-				}
-			}
-			// If still too large, scale down further and retry
-			const nextMax = Math.max(128, Math.floor(Math.max(canvasToUse.width, canvasToUse.height) * 0.7));
-			canvasToUse = scaleCanvas(canvasToUse, nextMax);
-		}
-		return bestDataUrl;
-	}
-
-	saveBtn.addEventListener('click', async () => {
-		try {
-			saveBtn.disabled = true; saveBtn.style.opacity = '0.7';
-			const dataUrl = await buildCompressedDataUrl({ maxDim: 1024, maxBase64Chars: 45000 });
-			await fetch('/api/send-canvas', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ room, dataUrl })
-			});
-			if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.HapticFeedback) {
-				window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
-			}
-		} catch (err) {
-			console.error('Failed to send image', err);
-		} finally { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
-	});
 
 	clearBtn.addEventListener('click', () => {
 		ctx.globalCompositeOperation = 'source-over';
