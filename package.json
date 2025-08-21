@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "./node_modules/.bin/concurrently \"npm --prefix server start\" \"npm --prefix bot start\"",
+    "start": "node node_modules/concurrently/dist/main.js \"npm:start:server\" \"npm:start:bot\"",
+    "start:server": "npm start --prefix server",
+    "start:bot": "npm start --prefix bot",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -19,6 +21,6 @@
   },
   "homepage": "https://github.com/Yurich3112/telegram-drawing-app#readme",
   "dependencies": {
-    "concurrently": "^9.2.0"
+    "concurrently": "^8.2.2"
   }
 }
