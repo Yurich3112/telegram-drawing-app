@@ -159,6 +159,8 @@ window.addEventListener('load', async () => {
 	let pendingStroke = null; // { x, y, tool, color, size }
 	let strokeStarted = false;
 	const STROKE_START_TOLERANCE_SQ = 4; // px^2
+	// Snapshot of local stroke style to keep consistency during stroke
+	let currentStroke = null; // { tool, color, size }
 
 	// Pending fill to avoid accidental fill during pinch/zoom
 	let pendingFill = null; // { startX, startY, color }
@@ -250,6 +252,8 @@ window.addEventListener('load', async () => {
 		ctx.lineJoin = 'round';
 		ctx.lineWidth = state.size;
 		ctx.strokeStyle = isEraser ? '#ffffff' : state.color;
+		ctx.beginPath();
+		ctx.moveTo(state.lastX, state.lastY);
 		const midX = (state.lastX + data.x) / 2;
 		const midY = (state.lastY + data.y) / 2;
 		ctx.quadraticCurveTo(state.lastX, state.lastY, midX, midY);
@@ -266,6 +270,15 @@ window.addEventListener('load', async () => {
 	}
 
 	function handleDraw(data) {
+		const stroke = currentStroke;
+		const isEraser = stroke ? stroke.tool === 'eraser' : (currentTool === 'eraser');
+		ctx.globalCompositeOperation = 'source-over';
+		ctx.lineCap = 'round';
+		ctx.lineJoin = 'round';
+		ctx.lineWidth = stroke ? stroke.size : currentSize;
+		ctx.strokeStyle = isEraser ? '#ffffff' : (stroke ? stroke.color : currentColor);
+		ctx.beginPath();
+		ctx.moveTo(lastX, lastY);
 		const midX = (lastX + data.x) / 2;
 		const midY = (lastY + data.y) / 2;
 		ctx.quadraticCurveTo(lastX, lastY, midX, midY);
@@ -274,7 +287,7 @@ window.addEventListener('load', async () => {
 		render();
 	}
 
-	function handleStopDrawing() { ctx.beginPath(); }
+	function handleStopDrawing() { ctx.beginPath(); currentStroke = null; }
 
 	function updateCursor() {
 		if (isPanning || isSpaceDown) { displayCanvas.style.cursor = 'grab'; return; }
@@ -450,6 +463,36 @@ window.addEventListener('load', async () => {
 		if (data && data.senderId && data.senderId !== socket.id) { remoteHandleStopDrawing(data.senderId); return; }
 		handleStopDrawing();
 	});
+	// Render buffered remote strokes as a single committed path
+	socket.on('commitStroke', ({ senderId, tool, color, size, points }) => {
+		if (!Array.isArray(points) || points.length === 0) return;
+		const isEraser = tool === 'eraser';
+		ctx.globalCompositeOperation = 'source-over';
+		ctx.lineCap = 'round';
+		ctx.lineJoin = 'round';
+		ctx.lineWidth = size;
+		ctx.strokeStyle = isEraser ? '#ffffff' : color;
+		ctx.beginPath();
+		if (points.length === 1) {
+			const p = points[0];
+			ctx.moveTo(p.x, p.y);
+			ctx.lineTo(p.x, p.y);
+			ctx.stroke();
+			render();
+			return;
+		}
+		let prev = points[0];
+		ctx.moveTo(prev.x, prev.y);
+		for (let i = 1; i < points.length; i++) {
+			const p = points[i];
+			const midX = (prev.x + p.x) / 2;
+			const midY = (prev.y + p.y) / 2;
+			ctx.quadraticCurveTo(prev.x, prev.y, midX, midY);
+			prev = p;
+		}
+		ctx.stroke();
+		render();
+	});
 	socket.on('fill', (data) => { floodFill(data); });
 	socket.on('clearCanvas', () => { ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height); render(); });
 
@@ -507,6 +550,7 @@ window.addEventListener('load', async () => {
 
 	function beginStroke(data) {
 		strokeStarted = true;
+		currentStroke = { tool: data.tool, color: data.color, size: data.size };
 		handleStartDrawing(data);
 		socket.emit('startDrawing', { ...data, senderId: socket.id });
 	}
