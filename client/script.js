@@ -2,27 +2,35 @@ window.addEventListener('load', async () => {
 	// Tell the Telegram client that the app is ready.
 	window.Telegram.WebApp.ready();
 
-	// Parse room from URL or derive via Telegram WebApp initData (no token)
-	const params = new URLSearchParams(window.location.search);
-	let room = params.get('room');
+	// Require Telegram WebApp environment
+	const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+	const initDataUnsafe = tg ? tg.initDataUnsafe : null;
+	if (!initDataUnsafe) {
+		alert('Please open this app from Telegram.');
+		return;
+	}
 
+	// Resolve room inside Telegram only
+	let room = null;
+	const params = new URLSearchParams(window.location.search);
+	const startParam = initDataUnsafe.start_param || null;
+	if (startParam && startParam.startsWith('r_')) {
+		room = decodeURIComponent(startParam.slice(2));
+	}
 	if (!room) {
-		const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
-		const initDataUnsafe = tg ? tg.initDataUnsafe : {};
-		const startParam = (initDataUnsafe && initDataUnsafe.start_param) ? initDataUnsafe.start_param : null;
-		if (startParam && startParam.startsWith('r_')) {
-			room = decodeURIComponent(startParam.slice(2));
-		}
-		if (!room && initDataUnsafe && initDataUnsafe.chat && initDataUnsafe.chat.id) {
-			room = String(initDataUnsafe.chat.id);
-		}
-		if (!room && initDataUnsafe && initDataUnsafe.user && initDataUnsafe.user.id) {
-			room = String(initDataUnsafe.user.id);
-		}
+		// Accept URL room only when inside Telegram
+		const urlRoom = params.get('room');
+		if (urlRoom) room = urlRoom;
+	}
+	if (!room && initDataUnsafe.chat && initDataUnsafe.chat.id) {
+		room = String(initDataUnsafe.chat.id); // groups
+	}
+	if (!room && initDataUnsafe.user && initDataUnsafe.user.id) {
+		room = String(initDataUnsafe.user.id); // private
 	}
 
 	if (!room) {
-		alert('Missing room parameter. Please open the app from the bot button.');
+		alert('Missing room. Please open from the bot button.');
 		return;
 	}
 

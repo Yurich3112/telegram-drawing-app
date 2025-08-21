@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const sharedSecret = process.env.SHARED_SECRET_KEY; // unused now, kept for future
 const appUrl = process.env.APP_BASE_URL;
+const directLinkSlug = process.env.BOT_DIRECT_LINK_SLUG || 'draw';
 
 if (!token || !appUrl) {
     console.error("Missing critical environment variables. Check your .env file.");
@@ -58,7 +59,11 @@ bot.onText(/^\/draw(?:@\w+)?$/, async (msg) => {
 
     const me = await bot.getMe();
     const startapp = makeStartAppPayload(chatId);
-    const startAppLink = `https://t.me/${me.username}?startapp=${startapp}`;
-    const text = `Launch Mini App: <a href="${startAppLink}">Open here</a>`;
-    bot.sendMessage(chatId, text, { parse_mode: 'HTML', disable_web_page_preview: true }).catch(console.error);
+    const startAppLink = directLinkSlug
+        ? `https://t.me/${me.username}/${directLinkSlug}?startapp=${startapp}`
+        : `https://t.me/${me.username}?startapp=${startapp}`;
+
+    // Put the URL plainly in the message to trigger Telegram preview card
+    const text = `Launch Mini App:\n${startAppLink}`;
+    bot.sendMessage(chatId, text, { disable_web_page_preview: false }).catch(console.error);
 });
