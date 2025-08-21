@@ -22,6 +22,12 @@ window.addEventListener('load', () => {
 	drawingCanvas.width = 2048;
 	drawingCanvas.height = 2048;
 	const ctx = drawingCanvas.getContext('2d', { willReadFrequently: true });
+	// Initialize with white background so the drawable area is opaque
+	ctx.save();
+	ctx.globalCompositeOperation = 'source-over';
+	ctx.fillStyle = '#ffffff';
+	ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+	ctx.restore();
 
 	// --- Bottom bar elements ---
 	const expansionPanel = document.getElementById('expansion-panel');
@@ -286,7 +292,7 @@ window.addEventListener('load', () => {
 	socket.on('draw', (data) => { handleDraw(data); });
 	socket.on('stopDrawing', () => { handleStopDrawing(); });
 	socket.on('fill', (data) => { floodFill(data); });
-	socket.on('clearCanvas', () => { ctx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height); render(); });
+	socket.on('clearCanvas', () => { ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height); render(); });
 
 	socket.on('loadCanvas', ({ dataUrl }) => {
 		const img = new Image();
@@ -511,7 +517,9 @@ window.addEventListener('load', () => {
 	redoBtn.addEventListener('click', () => socket.emit('redo'));
 
 	clearBtn.addEventListener('click', () => {
-		ctx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+		ctx.globalCompositeOperation = 'source-over';
+		ctx.fillStyle = '#ffffff';
+		ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height);
 		render();
 		socket.emit('clearCanvas');
 		socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
