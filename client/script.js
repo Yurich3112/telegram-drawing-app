@@ -123,6 +123,11 @@ window.addEventListener('load', () => {
 	let panLastClientX = 0;
 	let panLastClientY = 0;
 
+	// NEW: pending stroke to avoid initial dot during pinch
+	let pendingStroke = null; // { x, y, tool, color, size }
+	let strokeStarted = false;
+	const STROKE_START_TOLERANCE_SQ = 4; // px^2
+
 	function clampScale(s) { return Math.min(MAX_SCALE, Math.max(MIN_SCALE, s)); }
 	function getDPR() { return window.devicePixelRatio || 1; }
 
@@ -140,10 +145,20 @@ window.addEventListener('load', () => {
 	function render() {
 		const dpr = getDPR();
 		displayCtx.setTransform(1, 0, 0, 1, 0, 0);
+		// Darker background outside the canvas to highlight edges
 		displayCtx.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
+		displayCtx.fillStyle = '#1f2a35';
+		displayCtx.fillRect(0, 0, displayCanvas.width, displayCanvas.height);
+		// Draw the offscreen canvas with the current transform
 		displayCtx.setTransform(viewScale * dpr, 0, 0, viewScale * dpr, viewOffsetX * dpr, viewOffsetY * dpr);
 		displayCtx.imageSmoothingEnabled = false;
 		displayCtx.drawImage(drawingCanvas, 0, 0);
+		// Outline the drawing area for clear boundaries
+		displayCtx.save();
+		displayCtx.strokeStyle = 'rgba(0,0,0,0.6)';
+		displayCtx.lineWidth = Math.max(1 / (viewScale * dpr), 0.5 / dpr);
+		displayCtx.strokeRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+		displayCtx.restore();
 		displayCtx.setTransform(1, 0, 0, 1, 0, 0);
 	}
 
@@ -320,10 +335,15 @@ window.addEventListener('load', () => {
 	colorToggleBtn.addEventListener('click', () => togglePanel('color'));
 	historyToggleBtn.addEventListener('click', () => togglePanel('history'));
 
-	// Pointer input handling (supports mouse, touch, pen)
 	function shouldPanOnPointerDown(e) {
 		const isMiddleButton = e.button === 1 || (e.pointerType === 'mouse' && (e.buttons & 4) !== 0);
 		return isSpaceDown || isMiddleButton;
+	}
+
+	function beginStroke(data) {
+		strokeStarted = true;
+		handleStartDrawing(data);
+		socket.emit('startDrawing', data);
 	}
 
 	function onPointerDown(e) {
@@ -347,21 +367,26 @@ window.addEventListener('load', () => {
 			const centerX = (p1.clientX + p2.clientX) / 2;
 			const centerY = (p1.clientY + p2.clientY) / 2;
 			pinchState = { startDist: Math.hypot(dx, dy), startScale: viewScale, startOffsetX: viewOffsetX, startOffsetY: viewOffsetY, centerX, centerY };
+			// Cancel any pending stroke to avoid a dot
+			isDrawing = false;
+			pendingStroke = null;
+			strokeStarted = false;
 			drawingPointerId = null;
-		} else if (activePointers.size === 1) {
-			const { x, y } = canvasPointFromClient(e.clientX, e.clientY);
-			if (currentTool === 'fill') {
-				const data = { startX: x, startY: y, color: currentColor };
-				socket.emit('fill', data);
-				floodFill(data);
-				socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
-			} else {
-				isDrawing = true;
-				drawingPointerId = e.pointerId;
-				const data = { x, y, tool: currentTool, color: currentColor, size: Number(currentSize) };
-				handleStartDrawing(data);
-				socket.emit('startDrawing', data);
-			}
+			return;
+		}
+
+		// Single pointer
+		const { x, y } = canvasPointFromClient(e.clientX, e.clientY);
+		if (currentTool === 'fill') {
+			const data = { startX: x, startY: y, color: currentColor };
+			socket.emit('fill', data);
+			floodFill(data);
+			socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
+		} else {
+			isDrawing = true;
+			drawingPointerId = e.pointerId;
+			pendingStroke = { x, y, tool: currentTool, color: currentColor, size: Number(currentSize) };
+			strokeStarted = false;
 		}
 		e.preventDefault();
 	}
@@ -402,18 +427,35 @@ window.addEventListener('load', () => {
 
 		if (isDrawing && drawingPointerId === e.pointerId) {
 			const { x, y } = canvasPointFromClient(e.clientX, e.clientY);
-			const data = { x, y };
-			handleDraw(data);
-			socket.emit('draw', data);
+			if (!strokeStarted && pendingStroke) {
+				const dx = x - pendingStroke.x;
+				const dy = y - pendingStroke.y;
+				if ((dx * dx + dy * dy) >= STROKE_START_TOLERANCE_SQ) {
+					beginStroke(pendingStroke);
+				}
+			}
+			if (strokeStarted) {
+				const data = { x, y };
+				handleDraw(data);
+				socket.emit('draw', data);
+			}
 		}
 		e.preventDefault();
 	}
 
 	function onPointerUp(e) {
-		if (drawingPointerId === e.pointerId && isDrawing) {
-			isDrawing = false;
-			socket.emit('stopDrawing');
-			socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
+		if (drawingPointerId === e.pointerId && (isDrawing || pendingStroke)) {
+			// If no movement occurred and stroke not started, treat as dot tap
+			if (!strokeStarted && pendingStroke) {
+				beginStroke(pendingStroke);
+				handleStopDrawing();
+				socket.emit('stopDrawing');
+				socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
+			} else if (strokeStarted) {
+				isDrawing = false;
+				socket.emit('stopDrawing');
+				socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
+			}
 		}
 		if (panPointerId === e.pointerId) {
 			isPanning = false;
@@ -422,6 +464,11 @@ window.addEventListener('load', () => {
 		}
 		activePointers.delete(e.pointerId);
 		if (activePointers.size < 2) { pinchState = null; }
+		// Reset stroke state
+		pendingStroke = null;
+		strokeStarted = false;
+		isDrawing = false;
+		drawingPointerId = null;
 		e.preventDefault();
 	}
 
