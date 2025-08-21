@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Collaborative Drawing App</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+
+    <div class="app-container">
+        <!-- Add a placeholder message here -->
+        <div id="user-list">
+            <h3>Connecting...</h3>
+        </div>
+
+        <div class="main-content">
+            <div id="toolbar">
+                <!-- (Toolbar content is the same) -->
+                <div class="tool-section">
+                    <button class="tool active" id="brushBtn" title="Brush"><i class="fa-solid fa-paintbrush"></i></button>
+                    <button class="tool" id="eraserBtn" title="Eraser"><i class="fa-solid fa-eraser"></i></button>
+                    <button class="tool" id="fillBtn" title="Fill (Bucket)"><i class="fa-solid fa-fill-drip"></i></button>
+                </div>
+                <div class="tool-section">
+                    <label for="brushSize" title="Brush Size"><i class="fa-solid fa-pen-nib"></i></label>
+                    <input type="range" id="brushSize" min="1" max="100" value="10">
+                </div>
+                <div class="tool-section">
+                    <label for="colorPicker" title="Choose Color"><i class="fa-solid fa-palette"></i></label>
+                    <input type="color" id="colorPicker" value="#0000FF">
+                    <div id="color-palette"></div>
+                </div>
+                <div class="tool-section">
+                    <button class="action" id="undoBtn" title="Undo"><i class="fa-solid fa-rotate-left"></i></button>
+                    <button class="action" id="redoBtn" title="Redo"><i class="fa-solid fa-rotate-right"></i></button>
+                    <button class="action" id="clearBtn" title="Clear Canvas"><i class="fa-solid fa-trash"></i></button>
+                </div>
+            </div>
+            <canvas id="drawing-canvas"></canvas>
+        </div>
+    </div>
+
+    <div id="signature-modal">
+        <!-- (Modal content is the same) -->
+        <div class="modal-content">
+            <h2>Draw your signature to join</h2>
+            <canvas id="signature-canvas" width="400" height="200"></canvas>
+            <button id="confirm-signature" disabled>Join Drawing</button>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
