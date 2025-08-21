@@ -2,9 +2,12 @@
   "name": "bot",
   "version": "1.0.0",
   "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
+"scripts": {
+  "start": "concurrently \"npm --prefix server start\" \"npm --prefix bot start\""
+},    "scripts": {
+      "start": "node bot.js",
+      "test": "echo \"Error: no test specified\" && exit 1"
+    },
   "keywords": [],
   "author": "",
   "license": "ISC",
