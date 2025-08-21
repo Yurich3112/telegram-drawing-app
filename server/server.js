@@ -2,17 +2,15 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
-const fetch = require('node-fetch');
 require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
 // Serve client unconditionally
 app.get('/', (req, res) => {
@@ -21,36 +19,6 @@ app.get('/', (req, res) => {
 
 // Static assets (scripts, css, icons)
 app.use(express.static(path.join(__dirname, '..', 'client')));
-// Accept dataUrl from client and forward as photo to Telegram chat
-app.post('/api/send-canvas', async (req, res) => {
-  try {
-    if (!BOT_TOKEN) return res.status(500).json({ error: 'Missing bot token' });
-    const { room, dataUrl } = req.body || {};
-    if (!room || !dataUrl) return res.status(400).json({ error: 'Missing room or dataUrl' });
-    // Convert dataUrl to Buffer
-    const match = /^data:image\/(png|jpeg);base64,(.+)$/i.exec(dataUrl);
-    if (!match) return res.status(400).json({ error: 'Invalid dataUrl' });
-    const buffer = Buffer.from(match[2], 'base64');
-
-    const form = new (require('form-data'))();
-    form.append('chat_id', room);
-    form.append('photo', buffer, { filename: 'canvas.png', contentType: 'image/png' });
-    form.append('caption', 'Latest canvas snapshot');
-
-    const tgResp = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
-      method: 'POST',
-      body: form
-    });
-    const body = await tgResp.json();
-    if (!tgResp.ok || !body.ok) {
-      return res.status(500).json({ error: 'Telegram send failed', details: body });
-    }
-    res.json({ ok: true });
-  } catch (err) {
-    console.error('send-canvas error', err);
-    res.status(500).json({ error: 'Internal error' });
-  }
-});
 
 // In-memory per-room state
 const rooms = new Map();

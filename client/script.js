@@ -71,11 +71,34 @@ window.addEventListener('load', async () => {
 	const clearBtn = document.getElementById('clearBtn');
 	const undoBtn = document.getElementById('undoBtn');
 	const redoBtn = document.getElementById('redoBtn');
-	const saveBtn = document.getElementById('saveBtn');
 	const brushBtn = document.getElementById('brushBtn');
 	const eraserBtn = document.getElementById('eraserBtn');
 	const fillBtn = document.getElementById('fillBtn');
 	const paletteContainer = document.getElementById('color-palette');
+
+	// Floating Save button (top-right) that persists regardless of signatures/modal
+	const saveBtn = document.createElement('button');
+	saveBtn.setAttribute('aria-label', 'Save canvas to chat');
+	saveBtn.title = 'Save';
+	saveBtn.textContent = '💾';
+	saveBtn.style.position = 'fixed';
+	saveBtn.style.top = '10px';
+	saveBtn.style.right = '10px';
+	saveBtn.style.width = '44px';
+	saveBtn.style.height = '44px';
+	saveBtn.style.borderRadius = '12px';
+	saveBtn.style.border = 'none';
+	saveBtn.style.background = '#2c3e50';
+	saveBtn.style.color = '#fff';
+	saveBtn.style.fontSize = '22px';
+	saveBtn.style.lineHeight = '44px';
+	saveBtn.style.textAlign = 'center';
+	saveBtn.style.cursor = 'pointer';
+	saveBtn.style.zIndex = '10000';
+	saveBtn.style.boxShadow = '0 2px 8px rgba(0,0,0,0.35)';
+	saveBtn.style.userSelect = 'none';
+	// Ensure button does not get hidden by modal overlays
+	document.body.appendChild(saveBtn);
 
 	// --- Signature Pad Logic ---
 	let isSigDrawing = false;
