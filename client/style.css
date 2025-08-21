@@ -1,7 +1,7 @@
 /* Basic page setup */
 :root {
     --toolbar-bg: #2c3e50;
-    --canvas-bg: #ecf0f1;
+    --canvas-bg: #e6e9ed; /* slightly grey */
     --button-bg: #34495e;
     --button-hover-bg: #4a627a;
     --active-color: #3498db;
@@ -34,35 +34,58 @@ body {
     flex: 1;
     overflow: hidden;
     touch-action: none; /* Allow custom pan/zoom/draw with pointer events */
-    background: #dfe6ec;
+    background: var(--canvas-bg);
 }
 
 #drawing-canvas {
     cursor: crosshair;
     background-color: #ffffff;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    box-shadow: 0 0 0 2px rgba(0,0,0,0.1); /* subtle outline to show edges */
     display: block;
     width: 100%;
     height: 100%;
 }
 
-/* --- Main Toolbar (Unchanged) --- */
-#toolbar { display: flex; flex-direction: column; padding: 15px; background-color: var(--toolbar-bg); gap: 25px; min-height: 100vh; box-sizing: border-box; }
-.tool-section { display: flex; flex-direction: column; align-items: center; gap: 15px; }
-.tool, .action { background: var(--button-bg); border: none; color: white; width: 50px; height: 50px; font-size: 24px; border-radius: 10px; cursor: pointer; transition: background-color 0.2s; }
+/* --- Toolbar --- */
+#toolbar {
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+    background-color: var(--toolbar-bg);
+    gap: 16px;
+    min-height: 100vh;
+    width: 68px; /* make narrower */
+    box-sizing: border-box;
+}
+.tool-section { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.tool, .action { background: var(--button-bg); border: none; color: white; width: 44px; height: 44px; font-size: 20px; border-radius: 10px; cursor: pointer; transition: background-color 0.2s; }
 .tool:hover, .action:hover { background-color: var(--button-hover-bg); }
-.tool.active { background-color: var(--active-color); box-shadow: 0 0 10px var(--active-color); }
-#toolbar label { font-size: 24px; }
-input[type="color"] { -webkit-appearance: none; appearance: none; width: 50px; height: 50px; border: none; padding: 0; cursor: pointer; background-color: transparent; }
+.tool.active { background-color: var(--active-color); box-shadow: 0 0 8px var(--active-color); }
+#toolbar label { font-size: 20px; }
+input[type="color"] { -webkit-appearance: none; appearance: none; width: 44px; height: 44px; border: none; padding: 0; cursor: pointer; background-color: transparent; }
 input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
 input[type="color"]::-webkit-color-swatch { border: 2px solid white; border-radius: 10px; }
-input[type="range"] { -webkit-appearance: none; appearance: none; width: 100px; transform: rotate(270deg); margin-top: 50px; margin-bottom: 50px; }
-#color-palette { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.palette-color { width: 21px; height: 21px; border-radius: 50%; border: 2px solid white; cursor: pointer; transition: transform 0.2s; }
+input[type="range"] { -webkit-appearance: none; appearance: none; width: 90px; transform: rotate(270deg); margin-top: 34px; margin-bottom: 34px; }
+#color-palette { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.palette-color { width: 18px; height: 18px; border-radius: 50%; border: 2px solid white; cursor: pointer; transition: transform 0.2s; }
 .palette-color:hover { transform: scale(1.1); }
-.palette-color.empty { background-color: rgba(255, 255, 255, 0.1); border: 2px dashed rgba(255, 255, 255, 0.4); cursor: default; }
-.palette-color.empty:hover { transform: none; }
+.palette-color.empty { display: none; }
 
+/* Bottom toolbar on small screens */
+@media (max-width: 900px) {
+    .main-content { flex-direction: column-reverse; }
+    #toolbar {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        min-height: auto;
+        height: 68px;
+        gap: 10px;
+    }
+    .tool-section { flex-direction: row; gap: 10px; }
+    input[type="range"] { transform: none; width: 120px; margin: 0 10px; }
+}
 
 /* --- NEW: User List Styles --- */
 #user-list {

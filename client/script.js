@@ -95,7 +95,7 @@ window.addEventListener('load', () => {
 	let currentSize = Number(brushSize.value);
 	let lastX = 0;
 	let lastY = 0;
-	let recentColors = ['#e74c3c', '#f1c40f', '#2ecc71', '#3498db', '#9b59b6', null, null, null, null, null];
+	let recentColors = ['#e74c3c', '#f1c40f', '#2ecc71', '#3498db', '#9b59b6', '#1abc9c', '#e67e22', '#2c3e50'];
 
 	// Viewport transform state (applied to visible canvas only)
 	let viewScale = 1;
