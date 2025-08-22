@@ -146,9 +146,6 @@ window.addEventListener('load', async () => {
 	let drawingPointerId = null;
 	let pinchState = null;
 
-	// Track remote users' stroke states to avoid conflicts
-	const remoteStrokes = new Map(); // userId -> { lastX, lastY, color, size, tool, started }
-
 	// PC pan state
 	let isSpaceDown = false;
 	let isPanning = false;
@@ -160,6 +157,9 @@ window.addEventListener('load', async () => {
 	let pendingStroke = null; // { x, y, tool, color, size }
 	let strokeStarted = false;
 	const STROKE_START_TOLERANCE_SQ = 4; // px^2
+	// Stroke batching (client-only while drawing)
+	let currentStrokePoints = [];
+	let currentStrokeMeta = null; // { tool, color, size }
 
 	// Pending fill to avoid accidental fill during pinch/zoom
 	let pendingFill = null; // { startX, startY, color }
@@ -256,6 +256,52 @@ window.addEventListener('load', async () => {
 		displayCtx.setTransform(1, 0, 0, 1, 0, 0);
 	}
 
+	function applyStrokeFromServer(stroke) {
+		if (!stroke || !stroke.points || stroke.points.length === 0) return;
+		const { tool, color, size, points } = stroke;
+		const isEraser = tool === 'eraser';
+		ctx.save();
+		ctx.globalCompositeOperation = 'source-over';
+		ctx.lineCap = 'round';
+		ctx.lineJoin = 'round';
+		ctx.lineWidth = size;
+		ctx.strokeStyle = isEraser ? '#ffffff' : color;
+		ctx.beginPath();
+		if (points.length === 1) {
+			const p = points[0];
+			ctx.moveTo(p.x, p.y);
+			ctx.lineTo(p.x, p.y);
+			ctx.stroke();
+			ctx.restore();
+			render();
+			return;
+		}
+		let prev = points[0];
+		ctx.moveTo(prev.x, prev.y);
+		for (let i = 1; i < points.length; i++) {
+			const curr = points[i];
+			const midX = (prev.x + curr.x) / 2;
+			const midY = (prev.y + curr.y) / 2;
+			ctx.quadraticCurveTo(prev.x, prev.y, midX, midY);
+			prev = curr;
+		}
+		ctx.lineTo(prev.x, prev.y);
+		ctx.stroke();
+		ctx.restore();
+		render();
+	}
+
+	function emitCompletedStroke() {
+		if (!currentStrokeMeta || currentStrokePoints.length === 0) return;
+		const stroke = {
+			tool: currentStrokeMeta.tool,
+			color: currentStrokeMeta.color,
+			size: currentStrokeMeta.size,
+			points: currentStrokePoints.slice()
+		};
+		socket.emit('stroke', stroke);
+	}
+
 	function canvasPointFromClient(clientX, clientY) {
 		const rect = displayCanvas.getBoundingClientRect();
 		const xCss = clientX - rect.left;
@@ -283,9 +329,6 @@ window.addEventListener('load', async () => {
 	function handleDraw(data) {
 		const midX = (lastX + data.x) / 2;
 		const midY = (lastY + data.y) / 2;
-		// Begin a separate path per segment to prevent interference with remote paths
-		ctx.beginPath();
-		ctx.moveTo(lastX, lastY);
 		ctx.quadraticCurveTo(lastX, lastY, midX, midY);
 		ctx.stroke();
 		[lastX, lastY] = [data.x, data.y];
@@ -293,54 +336,6 @@ window.addEventListener('load', async () => {
 	}
 
 	function handleStopDrawing() { ctx.beginPath(); }
-
-	// --- Remote drawing handlers (per user) ---
-	function handleRemoteStartDrawing(data) {
-		const { userId, x, y, color, size, tool } = data;
-		const isEraser = tool === 'eraser';
-		remoteStrokes.set(userId, { lastX: x, lastY: y, color, size, tool, started: true });
-		// Draw initial dot without affecting local path
-		ctx.save();
-		ctx.globalCompositeOperation = 'source-over';
-		ctx.beginPath();
-		ctx.lineCap = 'round';
-		ctx.lineJoin = 'round';
-		ctx.lineWidth = size;
-		ctx.strokeStyle = isEraser ? '#ffffff' : color;
-		ctx.moveTo(x, y);
-		ctx.lineTo(x, y);
-		ctx.stroke();
-		ctx.restore();
-		render();
-	}
-
-	function handleRemoteDraw(data) {
-		const { userId, x, y } = data;
-		const s = remoteStrokes.get(userId);
-		if (!s || !s.started) return;
-		const midX = (s.lastX + x) / 2;
-		const midY = (s.lastY + y) / 2;
-		ctx.save();
-		ctx.globalCompositeOperation = 'source-over';
-		ctx.beginPath();
-		ctx.lineCap = 'round';
-		ctx.lineJoin = 'round';
-		ctx.lineWidth = s.size;
-		ctx.strokeStyle = s.tool === 'eraser' ? '#ffffff' : s.color;
-		ctx.moveTo(s.lastX, s.lastY);
-		ctx.quadraticCurveTo(s.lastX, s.lastY, midX, midY);
-		ctx.stroke();
-		ctx.restore();
-		s.lastX = x; s.lastY = y;
-		render();
-	}
-
-	function handleRemoteStopDrawing(data) {
-		const { userId } = data || {};
-		const s = userId ? remoteStrokes.get(userId) : null;
-		if (s) s.started = false;
-		// Ensure local path is not affected; no-op on ctx path
-	}
 
 	function switchTool(tool) {
 		currentTool = tool;
@@ -499,42 +494,12 @@ window.addEventListener('load', async () => {
 	}
 
 	// Socket events
-	socket.on('startDrawing', (data) => { handleRemoteStartDrawing(data); });
-	socket.on('draw', (data) => { handleRemoteDraw(data); });
-	socket.on('stopDrawing', (data) => { handleRemoteStopDrawing(data); });
+	// Remote stroke application (sent only after another user finishes a stroke)
+	socket.on('applyStroke', (stroke) => { applyStrokeFromServer(stroke); });
 	socket.on('fill', (data) => { floodFill(data); });
 	socket.on('clearCanvas', () => { ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height); render(); });
 
-	// Drawing lock events
-	socket.on('drawingLocked', (data) => {
-		isCanvasLocked = true;
-		lockMessage = data.message;
-		showNotification(data.message, 4000);
-		updateCursor();
-		
-		// Add visual locked state
-		displayCanvas.classList.add('locked');
-		canvasContainer.classList.add('locked');
-		
-		// Cancel any pending drawing operations
-		if (isDrawing || pendingStroke) {
-			isDrawing = false;
-			pendingStroke = null;
-			strokeStarted = false;
-			drawingPointerId = null;
-		}
-	});
-
-	socket.on('drawingUnlocked', (data) => {
-		isCanvasLocked = false;
-		lockMessage = '';
-		showNotification(data.message, 2000);
-		updateCursor();
-		
-		// Remove visual locked state
-		displayCanvas.classList.remove('locked');
-		canvasContainer.classList.remove('locked');
-	});
+	// No locking in the new model
 
 	socket.on('loadCanvas', ({ dataUrl }) => {
 		const img = new Image();
@@ -591,20 +556,9 @@ window.addEventListener('load', async () => {
 	function beginStroke(data) {
 		strokeStarted = true;
 		handleStartDrawing(data);
-		socket.emit('startDrawing', data);
 	}
 
-	// Handle server rejection of drawing request
-	socket.on('drawingLocked', (data) => {
-		// If we were trying to start drawing, cancel it
-		if (strokeStarted && !isCanvasLocked) {
-			strokeStarted = false;
-			isDrawing = false;
-			pendingStroke = null;
-			drawingPointerId = null;
-			handleStopDrawing();
-		}
-	});
+	// No lock rejection handling in the new model
 
 	function onPointerDown(e) {
 		displayCanvas.setPointerCapture(e.pointerId);
@@ -638,12 +592,7 @@ window.addEventListener('load', async () => {
 			return;
 		}
 
-		// Check if canvas is locked for drawing
-		if (isCanvasLocked && currentTool !== 'fill') {
-			showNotification('Canvas is locked. Please wait for the current drawing to finish.', 2000);
-			e.preventDefault();
-			return;
-		}
+		// No canvas lock checks
 
 		// Single pointer
 		const { x, y } = canvasPointFromClient(e.clientX, e.clientY);
@@ -655,6 +604,8 @@ window.addEventListener('load', async () => {
 			drawingPointerId = e.pointerId;
 			pendingStroke = { x, y, tool: currentTool, color: currentColor, size: Number(currentSize) };
 			strokeStarted = false;
+			currentStrokeMeta = { tool: currentTool, color: currentColor, size: Number(currentSize) };
+			currentStrokePoints = [ { x, y } ];
 		}
 		e.preventDefault();
 	}
@@ -705,7 +656,7 @@ window.addEventListener('load', async () => {
 			if (strokeStarted) {
 				const data = { x, y };
 				handleDraw(data);
-				socket.emit('draw', data);
+				currentStrokePoints.push({ x, y });
 			}
 		}
 		e.preventDefault();
@@ -729,11 +680,13 @@ window.addEventListener('load', async () => {
 			if (!strokeStarted && pendingStroke) {
 				beginStroke(pendingStroke);
 				handleStopDrawing();
-				socket.emit('stopDrawing');
+				// Emit full stroke with a single point
+				emitCompletedStroke();
 				socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
 			} else if (strokeStarted) {
 				isDrawing = false;
-				socket.emit('stopDrawing');
+				// Finish local stroke then emit once
+				emitCompletedStroke();
 				socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
 			}
 		}
@@ -749,6 +702,8 @@ window.addEventListener('load', async () => {
 		strokeStarted = false;
 		isDrawing = false;
 		drawingPointerId = null;
+		currentStrokePoints = [];
+		currentStrokeMeta = null;
 		e.preventDefault();
 	}
 
@@ -791,10 +746,6 @@ window.addEventListener('load', async () => {
 	redoBtn.addEventListener('click', () => socket.emit('redo'));
 
 	clearBtn.addEventListener('click', () => {
-		if (isCanvasLocked) {
-			showNotification('Please wait for the current drawing to finish before clearing.', 2000);
-			return;
-		}
 		ctx.globalCompositeOperation = 'source-over';
 		ctx.fillStyle = '#ffffff';
 		ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height);
