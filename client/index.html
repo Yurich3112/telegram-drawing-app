@@ -22,6 +22,19 @@
             <!-- Canvas viewport -->
             <div id="canvas-container">
                 <canvas id="drawing-canvas"></canvas>
+                <!-- Guide UI -->
+                <div id="guide-ui">
+                    <button id="guideToggleBtn" class="guide-btn" title="Step-by-step guide"><i class="fa-solid fa-image"></i></button>
+                    <div id="guidePanel" class="hidden">
+                        <div class="guide-controls">
+                            <button id="guidePrevBtn" class="guide-ctrl" title="Previous step"><i class="fa-solid fa-chevron-left"></i></button>
+                            <button id="guidePickBtn" class="guide-ctrl" title="Choose image"><i class="fa-solid fa-image"></i></button>
+                            <button id="guideNextBtn" class="guide-ctrl" title="Next step"><i class="fa-solid fa-chevron-right"></i></button>
+                        </div>
+                        <div id="guideStatus" class="guide-status"></div>
+                        <div id="guideImageList" class="guide-list hidden"></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

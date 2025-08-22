@@ -59,6 +59,17 @@ window.addEventListener('load', async () => {
 	previewCanvas.height = 2048;
 	const previewCtx = previewCanvas.getContext('2d');
 
+	// --- Guide overlay canvases ---
+	const suggestionCanvas = document.createElement('canvas');
+	suggestionCanvas.width = 2048;
+	suggestionCanvas.height = 2048;
+	const suggestionCtx = suggestionCanvas.getContext('2d');
+
+	const stepCanvas = document.createElement('canvas');
+	stepCanvas.width = 2048;
+	stepCanvas.height = 2048;
+	const stepCtx = stepCanvas.getContext('2d');
+
 	// --- Bottom bar elements ---
 	const expansionPanel = document.getElementById('expansion-panel');
 	const panelTools = document.getElementById('panel-tools');
@@ -253,6 +264,10 @@ window.addEventListener('load', async () => {
 		displayCtx.setTransform(viewScale * dpr, 0, 0, viewScale * dpr, viewOffsetX * dpr, viewOffsetY * dpr);
 		displayCtx.imageSmoothingEnabled = false;
 		displayCtx.drawImage(drawingCanvas, 0, 0);
+		// Draw suggestion overlay (semi-transparent)
+		displayCtx.drawImage(suggestionCanvas, 0, 0);
+		// Draw current step painting
+		displayCtx.drawImage(stepCanvas, 0, 0);
 		// Draw preview layer over base
 		displayCtx.drawImage(previewCanvas, 0, 0);
 		// Outline the drawing area for clear boundaries
@@ -296,6 +311,41 @@ window.addEventListener('load', async () => {
 		ctx.lineTo(prev.x, prev.y);
 		ctx.stroke();
 		ctx.restore();
+		render();
+	}
+
+	function applyStepStrokeFromServer(stroke) {
+		if (!stroke || !stroke.points || stroke.points.length === 0) return;
+		const { tool, color, size, points } = stroke;
+		const isEraser = tool === 'eraser';
+		stepCtx.save();
+		stepCtx.globalCompositeOperation = 'source-over';
+		stepCtx.lineCap = 'round';
+		stepCtx.lineJoin = 'round';
+		stepCtx.lineWidth = size;
+		stepCtx.strokeStyle = isEraser ? '#ffffff' : color;
+		stepCtx.beginPath();
+		if (points.length === 1) {
+			const p = points[0];
+			stepCtx.moveTo(p.x, p.y);
+			stepCtx.lineTo(p.x, p.y);
+			stepCtx.stroke();
+			stepCtx.restore();
+			render();
+			return;
+		}
+		let prev = points[0];
+		stepCtx.moveTo(prev.x, prev.y);
+		for (let i = 1; i < points.length; i++) {
+			const curr = points[i];
+			const midX = (prev.x + curr.x) / 2;
+			const midY = (prev.y + curr.y) / 2;
+			stepCtx.quadraticCurveTo(prev.x, prev.y, midX, midY);
+			prev = curr;
+		}
+		stepCtx.lineTo(prev.x, prev.y);
+		stepCtx.stroke();
+		stepCtx.restore();
 		render();
 	}
 
@@ -355,11 +405,11 @@ window.addEventListener('load', async () => {
 		updateCursor();
 	}
 
-	function floodFill({ startX, startY, color }) {
+	function floodFillOn(ctxTarget, canvasTarget, { startX, startY, color }) {
 		const tolerance = 32;
-		const width = drawingCanvas.width;
-		const height = drawingCanvas.height;
-		const imageData = ctx.getImageData(0, 0, width, height);
+		const width = canvasTarget.width;
+		const height = canvasTarget.height;
+		const imageData = ctxTarget.getImageData(0, 0, width, height);
 		const data = imageData.data;
 		const sx = Math.floor(startX);
 		const sy = Math.floor(startY);
@@ -472,9 +522,12 @@ window.addEventListener('load', async () => {
 		tempCtx.globalCompositeOperation = 'source-in';
 		tempCtx.fillStyle = color;
 		tempCtx.fillRect(0, 0, width, height);
-		ctx.drawImage(tempCanvas, 0, 0);
+		ctxTarget.drawImage(tempCanvas, 0, 0);
 		render();
 	}
+
+	function floodFill(data) { floodFillOn(ctx, drawingCanvas, data); }
+	function stepFloodFill(data) { floodFillOn(stepCtx, stepCanvas, data); }
 
 	function updatePalette() {
 		paletteContainer.innerHTML = '';
@@ -507,6 +560,7 @@ window.addEventListener('load', async () => {
 	// Remote stroke application (sent only after another user finishes a stroke)
 	socket.on('applyStroke', (stroke) => { applyStrokeFromServer(stroke); });
 	socket.on('fill', (data) => { floodFill(data); });
+	socket.on('stepFill', (data) => { stepFloodFill(data); });
 	socket.on('clearCanvas', () => { ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height); previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height); render(); });
 
 	// No locking in the new model
@@ -519,6 +573,8 @@ window.addEventListener('load', async () => {
 			ctx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
 			ctx.drawImage(img, 0, 0);
 			previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+			suggestionCtx.clearRect(0, 0, suggestionCanvas.width, suggestionCanvas.height);
+			stepCtx.clearRect(0, 0, stepCanvas.width, stepCanvas.height);
 			render();
 		};
 	});
@@ -680,9 +736,14 @@ window.addEventListener('load', async () => {
 			pendingFill = null;
 			fillPointerId = null;
 			if (!pinchState) {
-				socket.emit('fill', data);
-				floodFill(data);
-				socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
+				if (guideActive) {
+					socket.emit('stepFill', data);
+					stepFloodFill(data);
+				} else {
+					socket.emit('fill', data);
+					floodFill(data);
+					socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
+				}
 			}
 		}
 
@@ -692,11 +753,23 @@ window.addEventListener('load', async () => {
 				beginStroke(pendingStroke);
 			}
 			if (strokeStarted) {
-				// Composite preview onto base, clear preview, then emit stroke
-				ctx.drawImage(previewCanvas, 0, 0);
-				previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
-				emitCompletedStroke();
-				socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
+				// Composite preview onto active target layer, clear preview, then emit
+				if (guideActive) {
+					stepCtx.drawImage(previewCanvas, 0, 0);
+					previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+					const stroke = {
+						tool: currentStrokeMeta.tool,
+						color: currentStrokeMeta.color,
+						size: currentStrokeMeta.size,
+						points: currentStrokePoints.slice()
+					};
+					socket.emit('stepStroke', stroke);
+				} else {
+					ctx.drawImage(previewCanvas, 0, 0);
+					previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+					emitCompletedStroke();
+					socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
+				}
 			}
 		}
 		if (panPointerId === e.pointerId) {
@@ -759,8 +832,291 @@ window.addEventListener('load', async () => {
 		ctx.fillStyle = '#ffffff';
 		ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height);
 		previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+		suggestionCtx.clearRect(0, 0, suggestionCanvas.width, suggestionCanvas.height);
+		stepCtx.clearRect(0, 0, stepCanvas.width, stepCanvas.height);
 		render();
 		socket.emit('clearCanvas');
+		socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
+	});
+
+	// --- Guide UI and Logic ---
+	const guideToggleBtn = document.getElementById('guideToggleBtn');
+	const guidePanel = document.getElementById('guidePanel');
+	const guidePrevBtn = document.getElementById('guidePrevBtn');
+	const guideNextBtn = document.getElementById('guideNextBtn');
+	const guidePickBtn = document.getElementById('guidePickBtn');
+	const guideImageList = document.getElementById('guideImageList');
+	const guideStatus = document.getElementById('guideStatus');
+
+	let guideActive = false;
+	let guideSvgPath = null;
+	let originalSvgDocument = null;
+	let originalSvgString = null;
+	let guideGroups = [];
+	let guideStepIndex = -1;
+	let guideViewBox = null; // {minX, minY, width, height}
+
+	function toggleGuidePanel() {
+		guidePanel.classList.toggle('hidden');
+	}
+
+	guideToggleBtn.addEventListener('click', toggleGuidePanel);
+	guidePickBtn.addEventListener('click', async () => {
+		if (!guideImageList.classList.contains('hidden')) {
+			guideImageList.classList.add('hidden');
+			return;
+		}
+		guideImageList.innerHTML = '';
+		guideStatus.textContent = 'Loading images...';
+		guideImageList.classList.remove('hidden');
+		try {
+			const res = await fetch('/api/svgs');
+			const files = await res.json();
+			guideImageList.innerHTML = '';
+			files.forEach(f => {
+				const item = document.createElement('div');
+				item.className = 'guide-item';
+				item.innerHTML = `<img src="${f.url}" alt=""><span>${f.name}</span>`;
+				item.addEventListener('click', () => {
+					guideImageList.classList.add('hidden');
+					guideStatus.textContent = 'Setting guide...';
+					socket.emit('guideSet', { svgPath: f.url, stepIndex: 0 });
+				});
+				guideImageList.appendChild(item);
+			});
+			guideStatus.textContent = files.length ? 'Pick an image' : 'No SVGs found.';
+		} catch (e) {
+			guideStatus.textContent = 'Failed to load image list.';
+		}
+	});
+
+	guidePrevBtn.addEventListener('click', () => {
+		if (!guideActive) return;
+		const nextIndex = Math.max(-1, guideStepIndex - 1);
+		socket.emit('guideStep', { stepIndex: nextIndex });
+		// Clear current step layer when moving back
+		stepCtx.clearRect(0, 0, stepCanvas.width, stepCanvas.height);
+		render();
+	});
+
+	guideNextBtn.addEventListener('click', () => {
+		if (!guideActive) return;
+		// Commit current step drawings to base first
+		socket.emit('commitStep');
+		// Advance step after commit
+		const nextIndex = Math.min(guideGroups.length - 1, guideStepIndex + 1);
+		socket.emit('guideStep', { stepIndex: nextIndex });
+	});
+
+	function clearSuggestion() {
+		suggestionCtx.clearRect(0, 0, suggestionCanvas.width, suggestionCanvas.height);
+	}
+
+	function clearStepLayer() {
+		stepCtx.clearRect(0, 0, stepCanvas.width, stepCanvas.height);
+	}
+
+	function parseSvgAndGroup(svgString) {
+		const parser = new DOMParser();
+		const svgDoc = parser.parseFromString(svgString, 'image/svg+xml');
+		if (svgDoc.querySelector('parsererror')) {
+			throw new Error('Invalid SVG');
+		}
+		const svgEl = svgDoc.documentElement;
+		const vb = svgEl.getAttribute('viewBox');
+		if (vb) {
+			const parts = vb.trim().split(/\s+/).map(Number);
+			guideViewBox = { minX: parts[0], minY: parts[1], width: parts[2], height: parts[3] };
+		} else {
+			const width = parseFloat(svgEl.getAttribute('width')) || 2048;
+			const height = parseFloat(svgEl.getAttribute('height')) || 2048;
+			guideViewBox = { minX: 0, minY: 0, width, height };
+		}
+		// assign data-guide-id to each shape and compute groups
+		const rawShapes = svgEl.querySelectorAll('rect, circle, ellipse, polygon, path');
+		let idCounter = 0;
+		const grouped = {};
+		rawShapes.forEach(shape => {
+			shape.setAttribute('data-guide-id', String(idCounter));
+			idCounter++;
+			let color = getEffectiveColor(shape);
+			if (!color || color === 'none') return;
+			color = color.toLowerCase().trim();
+			const area = calculateShapeArea(shape);
+			if (area <= 0) return;
+			if (!grouped[color]) grouped[color] = [];
+			grouped[color].push({ id: shape.getAttribute('data-guide-id'), area });
+		});
+		const groups = [];
+		for (const color in grouped) {
+			const arr = grouped[color];
+			const totalArea = arr.reduce((s, a) => s + a.area, 0);
+			groups.push({ color, totalArea, ids: arr.map(a => a.id) });
+		}
+		groups.sort((a, b) => b.totalArea - a.totalArea);
+		return { svgEl, groups };
+	}
+
+	function getEffectiveColor(element) {
+		let color = element.getAttribute('fill');
+		if (color && color !== 'none') return color;
+		color = element.getAttribute('stroke');
+		if (color && color !== 'none') return color;
+		try {
+			const computedStyle = window.getComputedStyle(element);
+			color = computedStyle.getPropertyValue('fill');
+			if (color && color !== 'none' && color !== 'rgba(0, 0, 0, 0)') return color;
+			color = computedStyle.getPropertyValue('stroke');
+			if (color && color !== 'none' && color !== 'rgba(0, 0, 0, 0)') return color;
+		} catch (e) { }
+		return null;
+	}
+
+	function calculateShapeArea(element) {
+		let area = 0;
+		try {
+			switch (element.tagName.toLowerCase()) {
+				case 'rect': {
+					const width = parseFloat(element.getAttribute('width'));
+					const height = parseFloat(element.getAttribute('height'));
+					if (!isNaN(width) && !isNaN(height)) area = width * height;
+					break;
+				}
+				case 'circle': {
+					const r = parseFloat(element.getAttribute('r'));
+					if (!isNaN(r)) area = Math.PI * r * r;
+					break;
+				}
+				case 'ellipse': {
+					const rx = parseFloat(element.getAttribute('rx'));
+					const ry = parseFloat(element.getAttribute('ry'));
+					if (!isNaN(rx) && !isNaN(ry)) area = Math.PI * rx * ry;
+					break;
+				}
+				case 'polygon': {
+					const pointsString = element.getAttribute('points');
+					if (pointsString) area = calculatePolygonArea(pointsString);
+					break;
+				}
+				case 'path': {
+					const bbox = element.getBBox();
+					area = bbox.width * bbox.height;
+					break;
+				}
+				default: area = 0; break;
+			}
+		} catch (e) {
+			try { const bbox = element.getBBox(); area = bbox.width * bbox.height; } catch (_) { area = 0; }
+		}
+		return area;
+	}
+
+	function calculatePolygonArea(pointsString) {
+		const points = pointsString.trim().split(/\s+|,/).filter(n => n !== '').map(Number);
+		let area = 0;
+		for (let i = 0; i < points.length; i += 2) {
+			const x1 = points[i];
+			const y1 = points[i + 1];
+			const x2 = points[(i + 2) % points.length];
+			const y2 = points[(i + 3) % points.length];
+			area += (x1 * y2) - (y1 * x2);
+		}
+		return Math.abs(area / 2);
+	}
+
+	async function loadGuideSvg(svgPath, stepIndex) {
+		guideStatus.textContent = 'Loading SVG...';
+		const res = await fetch(svgPath);
+		const svgString = await res.text();
+		originalSvgString = svgString;
+		const { svgEl, groups } = parseSvgAndGroup(svgString);
+		originalSvgDocument = svgEl;
+		guideGroups = groups;
+		guideActive = true;
+		guideSvgPath = svgPath;
+		guideStepIndex = typeof stepIndex === 'number' ? stepIndex : -1;
+		renderSuggestion();
+		const total = guideGroups.length;
+		guideStatus.textContent = total ? `Ready. ${total} color groups.` : 'No drawable groups found.';
+	}
+
+	function renderSuggestion() {
+		clearSuggestion();
+		if (!guideActive || guideStepIndex < 0 || guideStepIndex >= guideGroups.length) { render(); return; }
+		const group = guideGroups[guideStepIndex];
+		// clone svg and hide non-group shapes
+		const clone = originalSvgDocument.cloneNode(true);
+		const all = clone.querySelectorAll('rect, circle, ellipse, polygon, path');
+		all.forEach(el => {
+			const id = el.getAttribute('data-guide-id');
+			if (!group.ids.includes(id)) {
+				el.setAttribute('opacity', '0');
+			} else {
+				el.setAttribute('opacity', '0.45');
+				el.setAttribute('stroke', '#000000');
+				el.setAttribute('stroke-width', '1');
+			}
+		});
+		// serialize and render into suggestion canvas with viewBox fit
+		const serializer = new XMLSerializer();
+		const svgStr = serializer.serializeToString(clone);
+		const blob = new Blob([svgStr], { type: 'image/svg+xml' });
+		const url = URL.createObjectURL(blob);
+		const img = new Image();
+		img.onload = () => {
+			suggestionCtx.save();
+			suggestionCtx.clearRect(0, 0, suggestionCanvas.width, suggestionCanvas.height);
+			const vb = guideViewBox || { minX: 0, minY: 0, width: img.width, height: img.height };
+			const scale = Math.min(2048 / vb.width, 2048 / vb.height);
+			const drawW = vb.width * scale;
+			const drawH = vb.height * scale;
+			const dx = Math.floor((2048 - drawW) / 2 - vb.minX * scale);
+			const dy = Math.floor((2048 - drawH) / 2 - vb.minY * scale);
+			suggestionCtx.imageSmoothingEnabled = true;
+			suggestionCtx.drawImage(img, dx, dy, drawW, drawH);
+			suggestionCtx.restore();
+			URL.revokeObjectURL(url);
+			render();
+		};
+		img.onerror = () => { URL.revokeObjectURL(url); };
+		img.src = url;
+	}
+
+	// Socket sync for guide
+	socket.on('guideSet', async ({ svgPath, stepIndex }) => {
+		try {
+			await loadGuideSvg(svgPath, stepIndex);
+			guideStatus.textContent = 'Guide ready.';
+		} catch (e) {
+			guideStatus.textContent = 'Failed to load guide.';
+		}
+	});
+
+	socket.on('guideStep', ({ stepIndex }) => {
+		guideStepIndex = stepIndex;
+		renderSuggestion();
+	});
+
+	socket.on('guideEnd', () => {
+		guideActive = false;
+		guideSvgPath = null;
+		originalSvgDocument = null;
+		originalSvgString = null;
+		guideGroups = [];
+		guideStepIndex = -1;
+		clearSuggestion();
+		clearStepLayer();
+		render();
+	});
+
+	socket.on('applyStepStroke', (stroke) => { applyStepStrokeFromServer(stroke); });
+
+	socket.on('commitStep', () => {
+		// merge step layer onto base and clear
+		ctx.drawImage(stepCanvas, 0, 0);
+		clearStepLayer();
+		render();
+		// save state of base after commit
 		socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
 	});
 
