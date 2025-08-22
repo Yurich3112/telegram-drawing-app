@@ -116,7 +116,9 @@ window.addEventListener('load', async () => {
 	if (guideDrawingCanvas) { guideDrawingCanvas.width = drawingCanvas.width; guideDrawingCanvas.height = drawingCanvas.height; }
 
 	const availableGuides = [
-		{ name: 'Two Chickens', url: '/images/SVG/hand-drawn-image-of-two-yellow-baby-chicken-being- (1).svg' }
+		{ name: 'Two Chickens', url: 'https://raw.githubusercontent.com/Yurich3112/telegram-drawing-app/c1500591f0a0b111dfc68dbb60262fbc10aa9c4d/images/SVG/hand-drawn-image-of-two-yellow-baby-chicken-being-%20(1).svg' },
+		{ name: 'Two Turtles', url: 'https://raw.githubusercontent.com/Yurich3112/telegram-drawing-app/c1500591f0a0b111dfc68dbb60262fbc10aa9c4d/images/SVG/two-cute-turtles-swimming-in-the-sea-.svg' },
+		{ name: 'Two Dolphins', url: 'https://raw.githubusercontent.com/Yurich3112/telegram-drawing-app/c1500591f0a0b111dfc68dbb60262fbc10aa9c4d/images/SVG/two-happy-dolphins-.svg' }
 	];
 
 	// --- Signature Pad Logic ---
@@ -419,6 +421,98 @@ window.addEventListener('load', async () => {
 			currentColor = step.color;
 			colorSwatch.style.backgroundColor = currentColor;
 		}
+	}
+
+	// --- SVG parsing and grouping helpers ---
+	function getEffectiveColor(element) {
+		let color = element.getAttribute('fill');
+		if (color && color !== 'none') return color;
+		color = element.getAttribute('stroke');
+		if (color && color !== 'none') return color;
+		try {
+			const computedStyle = window.getComputedStyle(element);
+			color = computedStyle.getPropertyValue('fill');
+			if (color && color !== 'none' && color !== 'rgba(0, 0, 0, 0)') return color;
+			color = computedStyle.getPropertyValue('stroke');
+			if (color && color !== 'none' && color !== 'rgba(0, 0, 0, 0)') return color;
+		} catch (_) {}
+		return null;
+	}
+
+	function calculatePolygonArea(pointsString) {
+		const points = pointsString.trim().split(/\s+|,/).filter(n => n !== '').map(Number);
+		let area = 0;
+		for (let i = 0; i < points.length; i += 2) {
+			const x1 = points[i];
+			const y1 = points[i + 1];
+			const x2 = points[(i + 2) % points.length];
+			const y2 = points[(i + 3) % points.length];
+			area += (x1 * y2) - (y1 * x2);
+		}
+		return Math.abs(area / 2);
+	}
+
+	function calculateShapeArea(element) {
+		let area = 0;
+		try {
+			switch (element.tagName.toLowerCase()) {
+				case 'rect': {
+					const width = parseFloat(element.getAttribute('width'));
+					const height = parseFloat(element.getAttribute('height'));
+					if (!isNaN(width) && !isNaN(height)) area = width * height;
+					break;
+				}
+				case 'circle': {
+					const r = parseFloat(element.getAttribute('r'));
+					if (!isNaN(r)) area = Math.PI * r * r;
+					break;
+				}
+				case 'ellipse': {
+					const rx = parseFloat(element.getAttribute('rx'));
+					const ry = parseFloat(element.getAttribute('ry'));
+					if (!isNaN(rx) && !isNaN(ry)) area = Math.PI * rx * ry;
+					break;
+				}
+				case 'polygon': {
+					const pointsString = element.getAttribute('points');
+					if (pointsString) area = calculatePolygonArea(pointsString);
+					break;
+				}
+				case 'path': {
+					const bbox = element.getBBox();
+					area = bbox.width * bbox.height;
+					break;
+				}
+				default: {
+					area = 0;
+				}
+			}
+		} catch (e) {
+			try { const bbox = element.getBBox(); area = bbox.width * bbox.height; } catch(_) { area = 0; }
+		}
+		return area;
+	}
+
+	function extractAndSortShapes(svgDocument) {
+		const rawShapes = svgDocument.querySelectorAll('rect, circle, ellipse, polygon, path');
+		const groupedShapes = {};
+		rawShapes.forEach(shape => {
+			let color = getEffectiveColor(shape);
+			if (!color || color === 'none') return;
+			color = color.toLowerCase().trim();
+			const area = calculateShapeArea(shape);
+			if (area <= 0) return;
+			if (!groupedShapes[color]) groupedShapes[color] = [];
+			groupedShapes[color].push({ element: shape, area });
+		});
+		const sortedColorGroups = [];
+		for (const color in groupedShapes) {
+			const shapesInGroup = groupedShapes[color];
+			const totalArea = shapesInGroup.reduce((sum, s) => sum + s.area, 0);
+			sortedColorGroups.push({ color, totalArea, shapes: shapesInGroup });
+		}
+		sortedColorGroups.sort((a, b) => b.totalArea - a.totalArea);
+		return sortedColorGroups;
 	}
 
 	function canvasPointFromClient(clientX, clientY) {
