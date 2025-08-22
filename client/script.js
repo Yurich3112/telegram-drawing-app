@@ -640,6 +640,45 @@ window.addEventListener('load', async () => {
 			floodFill({ ...data, guide: !!data.guide });
 		}
 	});
+
+	// Guide synchronization
+	socket.on('guideCommitAndGotoStep', async ({ step, svgPath }) => {
+		// Commit any remote step drawings into our base if we have our own step visible
+		if (isGuideMode) {
+			ctx.drawImage(stepCanvas, 0, 0);
+			stepCtx.clearRect(0, 0, stepCanvas.width, stepCanvas.height);
+		}
+		// Clear remote step buffer when switching steps
+		remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
+		// Ensure we have the same SVG loaded
+		if (currentSvgPath !== svgPath) {
+			try {
+				const response = await fetch(svgPath);
+				const svgText = await response.text();
+				processSvgForGuide(svgText, svgPath);
+			} catch (_) {}
+		}
+		currentGuideStep = step;
+		renderCurrentStep();
+		updateGuideControls();
+		initStepHistory();
+	});
+
+	socket.on('guideExit', () => {
+		// Clear suggestion and remote step overlay
+		suggestionCtx.clearRect(0, 0, suggestionCanvas.width, suggestionCanvas.height);
+		remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
+		// Reset local guide state if active
+		isGuideMode = false;
+		currentGuideStep = -1;
+		sortedColorGroups = [];
+		loadedSvgDocument = null;
+		currentSvgPath = null;
+		loadedSvgViewBox = null;
+		cleanupMountedSvg();
+		exitGuideModeBtn.classList.add('hidden');
+		render();
+	});
 	socket.on('clearCanvas', () => { ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height); previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height); render(); });
 
 	// No locking in the new model
@@ -1196,10 +1235,10 @@ window.addEventListener('load', async () => {
 			renderCurrentStep();
 			updateGuideControls();
 			
-			// Clear remote guide buffer for the new step to avoid stale overlays
+			// Clear remote guide buffer for the new step to avoid stale overlays and sync commit
 			remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
-			// Emit to other players
-			socket.emit('guideStepChange', { step: currentGuideStep, svgPath: currentSvgPath });
+			// Emit commit-and-goto so others also commit their current step to base and switch overlay
+			socket.emit('guideCommitAndGotoStep', { step: currentGuideStep, svgPath: currentSvgPath });
 			initStepHistory();
 		}
 	}
@@ -1212,8 +1251,8 @@ window.addEventListener('load', async () => {
 			
 			// Clear remote guide buffer for the new step to avoid stale overlays
 			remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
-			// Emit to other players
-			socket.emit('guideStepChange', { step: currentGuideStep, svgPath: currentSvgPath });
+			// Emit commit-and-goto backward so others align as well
+			socket.emit('guideCommitAndGotoStep', { step: currentGuideStep, svgPath: currentSvgPath });
 			initStepHistory();
 		}
 	}
@@ -1391,6 +1430,8 @@ window.addEventListener('load', async () => {
 			socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
 			
 			render();
+			// Notify others to exit and clear suggestion overlays
+			socket.emit('guideExit');
 		}
 	}
 

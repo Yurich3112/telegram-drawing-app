@@ -103,6 +103,16 @@ io.on('connection', (socket) => {
     socket.to(room).emit('guideStepSync', { step, svgPath });
   });
 
+  // Commit current step to base across all clients and go to next step
+  socket.on('guideCommitAndGotoStep', ({ step, svgPath }) => {
+    socket.to(room).emit('guideCommitAndGotoStep', { step, svgPath });
+  });
+
+  // Exit guide mode across clients
+  socket.on('guideExit', () => {
+    socket.to(room).emit('guideExit');
+  });
+
   socket.on('disconnect', () => {
     state.activeUsers.delete(socket.id);
     io.to(room).emit('updateUserList', Array.from(state.activeUsers.values()));
