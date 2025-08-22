@@ -135,12 +135,14 @@ io.on('connection', (socket) => {
   });
 
   // Persist and broadcast the current guide step layer (top layer) as a data URL
-  socket.on('saveStepState', ({ dataUrl }) => {
+  socket.on('saveStepState', ({ dataUrl, broadcast }) => {
     if (!state.guide.active) return;
     try {
       state.guide.stepDataUrl = dataUrl || null;
-      // Do not broadcast on every stroke to avoid overwriting peers' in-progress step drawings
-      // New or reconnected clients will receive stepDataUrl via initState/guideSyncState
+      // Conditionally broadcast (used for undo/redo/clear). For strokes/fills we rely on per-stroke events.
+      if (broadcast) {
+        io.to(room).emit('loadStepState', { dataUrl: state.guide.stepDataUrl });
+      }
     } catch (_) {}
   });
 

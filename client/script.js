@@ -1071,7 +1071,7 @@ window.addEventListener('load', async () => {
 			if (stepHistoryIndex > 0) {
 				stepHistoryIndex--;
 				restoreStepSnapshot(stepHistoryIndex);
-				socket.emit('saveStepState', { dataUrl: composeCurrentStepLayerDataUrl() });
+				socket.emit('saveStepState', { dataUrl: composeCurrentStepLayerDataUrl(), broadcast: true });
 			}
 			return;
 		}
@@ -1082,7 +1082,7 @@ window.addEventListener('load', async () => {
 			if (stepHistoryIndex < stepHistory.length - 1) {
 				stepHistoryIndex++;
 				restoreStepSnapshot(stepHistoryIndex);
-				socket.emit('saveStepState', { dataUrl: composeCurrentStepLayerDataUrl() });
+				socket.emit('saveStepState', { dataUrl: composeCurrentStepLayerDataUrl(), broadcast: true });
 			}
 			return;
 		}
@@ -1096,7 +1096,7 @@ window.addEventListener('load', async () => {
 			remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
 			render();
 			initStepHistory();
-			socket.emit('saveStepState', { dataUrl: composeCurrentStepLayerDataUrl() });
+			socket.emit('saveStepState', { dataUrl: composeCurrentStepLayerDataUrl(), broadcast: true });
 			return;
 		}
 		ctx.globalCompositeOperation = 'source-over';
