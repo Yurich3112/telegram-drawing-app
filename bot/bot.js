@@ -88,6 +88,14 @@ function escapeHtml(text) {
 }
 
 
+// Функція-помічник для екранування HTML-тегів
+function escapeHtml(text) {
+    return text
+         .replace(/&/g, "&amp;")
+         .replace(/</g, "&lt;")
+         .replace(/>/g, "&gt;");
+}
+
 bot.on('inline_query', (query) => {
     const queryId = query.id;
     const roomName = query.query.trim();
@@ -97,30 +105,38 @@ bot.on('inline_query', (query) => {
             type: 'article',
             id: 'hint',
             title: 'Enter a canvas name',
-            input_message_content: {
-                message_text: 'Please enter a name for the canvas after mentioning the bot.'
-            }
+            input_message_content: { message_text: 'Please enter a name for the canvas.' }
         }], { cache_time: 10 }).catch(console.error);
         return;
     }
 
-    const startAppPayload = makeStartAppPayload(roomName);
+    // --- ЗМІНА №1: Створюємо унікальний ID для кімнати ---
+    // Генеруємо короткий випадковий рядок (наприклад, 'a1b2c3')
+    const uniqueSuffix = Math.random().toString(36).substring(2, 8);
+    // Створюємо фінальний ID кімнати, який буде унікальним
+    const uniqueRoomId = `${roomName}-${uniqueSuffix}`;
+
+    const startAppPayload = makeStartAppPayload(uniqueRoomId);
     const appDirectUrl = `https://t.me/${botUsername}/draw?startapp=${startAppPayload}`;
 
-    // Екрануємо назву кімнати перед вставкою в HTML
+    // Екрануємо назву для безпечного використання в HTML
     const safeRoomName = escapeHtml(roomName);
+    // Екрануємо URL для безпечного використання в атрибуті href
+    const safeUrl = escapeHtml(appDirectUrl);
 
     const results = [
         {
             type: 'article',
-            id: '1',
+            id: uniqueSuffix, // Використовуємо наш унікальний суфікс як ID результату
             title: `🎨 New Board "${roomName}"`,
-            description: 'Collaborative mode allows everyone to draw simultaneously on the same board.',
+            description: 'A unique canvas will be created for you and your friends.',
             
             input_message_content: {
-                // КЛЮЧОВА ЗМІНА: Використовуємо HTML для форматування
-                message_text: `Board <b>${safeRoomName}</b>\n${appDirectUrl}`,
-                parse_mode: 'HTML' // <-- Змінено з Markdown на HTML
+                // --- ЗМІНА №2: Робимо назву клікабельним посиланням ---
+                message_text: `Board: <b><a href="${safeUrl}">${safeRoomName}</a></b>`,
+                parse_mode: 'HTML',
+                // Вимикаємо попередній перегляд самого посилання, бо воно вже вбудоване
+                disable_web_page_preview: true
             },
             
             thumbnail_url: 'https://i.imgur.com/TZeA09j.png'
