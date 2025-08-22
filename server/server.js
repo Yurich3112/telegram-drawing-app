@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
 
 const app = express();
@@ -22,6 +23,20 @@ app.use(express.static(path.join(__dirname, '..', 'client')));
 
 // Serve images
 app.use('/images', express.static(path.join(__dirname, '..', 'images')));
+
+// API: list available SVG images under images/SVG
+app.get('/api/images/svg', (req, res) => {
+  const svgDir = path.join(__dirname, '..', 'images', 'SVG');
+  fs.readdir(svgDir, { withFileTypes: true }, (err, entries) => {
+    if (err) {
+      return res.status(500).json({ error: 'Failed to read images directory' });
+    }
+    const svgs = entries
+      .filter(e => e.isFile() && e.name.toLowerCase().endsWith('.svg'))
+      .map(e => ({ name: e.name, url: `/images/SVG/${e.name}` }));
+    res.json({ images: svgs });
+  });
+});
 
 // In-memory per-room state
 const rooms = new Map();

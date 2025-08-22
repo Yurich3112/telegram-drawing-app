@@ -1146,25 +1146,25 @@ window.addEventListener('load', async () => {
 
 	// Guide mode functions
 	function loadAvailableImages() {
-		// For now, we'll hardcode the available images
-		// In a real implementation, this would be fetched from the server
-		const svgImages = [
-			'hand-drawn-image-of-two-yellow-baby-chicken-being- (1).svg',
-			'two-cute-turtles-swimming-in-the-sea-.svg',
-			'two-happy-dolphins-.svg'
-		];
-
 		imageList.innerHTML = '';
-		svgImages.forEach(imageName => {
-			const imageItem = document.createElement('div');
-			imageItem.className = 'image-item';
-			imageItem.innerHTML = `<img src="/images/SVG/${imageName}" alt="${imageName}">`;
-			imageItem.addEventListener('click', () => {
-				loadSvgForGuide(`/images/SVG/${imageName}`);
-				imageSelection.classList.add('hidden');
+		fetch('/api/images/svg')
+			.then(resp => resp.json())
+			.then(({ images }) => {
+				if (!Array.isArray(images)) return;
+				images.forEach(({ name, url }) => {
+					const imageItem = document.createElement('div');
+					imageItem.className = 'image-item';
+					imageItem.innerHTML = `<img src="${url}" alt="${name}">`;
+					imageItem.addEventListener('click', () => {
+						loadSvgForGuide(url);
+						imageSelection.classList.add('hidden');
+					});
+					imageList.appendChild(imageItem);
+				});
+			})
+			.catch(() => {
+				imageList.innerHTML = '<div style="padding:8px;color:#ccc;">No images found</div>';
 			});
-			imageList.appendChild(imageItem);
-		});
 	}
 
 	async function loadSvgForGuide(svgPath) {
