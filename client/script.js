@@ -72,6 +72,18 @@ window.addEventListener('load', async () => {
 	stepCanvas.height = 2048;
 	const stepCtx = stepCanvas.getContext('2d');
 
+	// Remote committed strokes (normal mode)
+	const remoteCanvas = document.createElement('canvas');
+	remoteCanvas.width = 2048;
+	remoteCanvas.height = 2048;
+	const remoteCtx = remoteCanvas.getContext('2d');
+
+	// Remote guide step strokes
+	const remoteStepCanvas = document.createElement('canvas');
+	remoteStepCanvas.width = 2048;
+	remoteStepCanvas.height = 2048;
+	const remoteStepCtx = remoteStepCanvas.getContext('2d');
+
 	// --- Bottom bar elements ---
 	const expansionPanel = document.getElementById('expansion-panel');
 	const panelTools = document.getElementById('panel-tools');
@@ -310,17 +322,21 @@ window.addEventListener('load', async () => {
 		// Draw the offscreen canvas with the current transform
 		displayCtx.setTransform(viewScale * dpr, 0, 0, viewScale * dpr, viewOffsetX * dpr, viewOffsetY * dpr);
 		displayCtx.imageSmoothingEnabled = false;
+		// Base order: committed base, then remote base (others), then our step, then remote step, then suggestion, then preview
 		displayCtx.drawImage(drawingCanvas, 0, 0);
+		displayCtx.drawImage(remoteCanvas, 0, 0);
 		// Draw suggestion layer (semi-transparent) if in guide mode
 		if (isGuideMode && suggestionCtx) {
 			displayCtx.save();
 			displayCtx.globalAlpha = 0.5;
+			// Ensure suggestion sits under the step layers
 			displayCtx.drawImage(suggestionCanvas, 0, 0);
 			displayCtx.restore();
 		}
 		// Draw current step layer if in guide mode
 		if (isGuideMode && stepCtx) {
 			displayCtx.drawImage(stepCanvas, 0, 0);
+			displayCtx.drawImage(remoteStepCanvas, 0, 0);
 		}
 		// Draw preview layer over base
 		displayCtx.drawImage(previewCanvas, 0, 0);
@@ -337,13 +353,13 @@ window.addEventListener('load', async () => {
 		if (!stroke || !stroke.points || stroke.points.length === 0) return;
 		const { tool, color, size, points } = stroke;
 		const isEraser = tool === 'eraser';
-		const targetCtx = (isGuideMode || stroke.guide) ? stepCtx : ctx;
+		const targetCtx = stroke.guide ? remoteStepCtx : remoteCtx;
 		targetCtx.save();
-		targetCtx.globalCompositeOperation = (isGuideMode || stroke.guide) && isEraser ? 'destination-out' : 'source-over';
+		targetCtx.globalCompositeOperation = stroke.guide && isEraser ? 'destination-out' : 'source-over';
 		targetCtx.lineCap = 'round';
 		targetCtx.lineJoin = 'round';
 		targetCtx.lineWidth = size;
-		targetCtx.strokeStyle = isEraser && !(isGuideMode || stroke.guide) ? '#ffffff' : color;
+		targetCtx.strokeStyle = isEraser && !stroke.guide ? '#ffffff' : color;
 		targetCtx.beginPath();
 		if (points.length === 1) {
 			const p = points[0];
@@ -604,7 +620,7 @@ window.addEventListener('load', async () => {
 	// Socket events
 	// Remote stroke application (sent only after another user finishes a stroke)
 	socket.on('applyStroke', (stroke) => { applyStrokeFromServer(stroke); });
-	socket.on('fill', (data) => { floodFill(data); });
+	socket.on('fill', (data) => { floodFill({ ...data, guide: !!data.guide }); });
 	socket.on('clearCanvas', () => { ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height); previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height); render(); });
 
 	// No locking in the new model
@@ -1040,6 +1056,9 @@ window.addEventListener('load', async () => {
 		exitGuideModeBtn.classList.remove('hidden');
 		render();
 		initStepHistory();
+
+		// Ensure remote step buffer is cleared at start to maintain correct z-order
+		remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
 	}
 
 	function extractAndSortShapes() {
@@ -1157,6 +1176,8 @@ window.addEventListener('load', async () => {
 			renderCurrentStep();
 			updateGuideControls();
 			
+			// Clear remote guide buffer for the new step to avoid stale overlays
+			remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
 			// Emit to other players
 			socket.emit('guideStepChange', { step: currentGuideStep, svgPath: currentSvgPath });
 			initStepHistory();
@@ -1169,6 +1190,8 @@ window.addEventListener('load', async () => {
 			renderCurrentStep();
 			updateGuideControls();
 			
+			// Clear remote guide buffer for the new step to avoid stale overlays
+			remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
 			// Emit to other players
 			socket.emit('guideStepChange', { step: currentGuideStep, svgPath: currentSvgPath });
 			initStepHistory();
