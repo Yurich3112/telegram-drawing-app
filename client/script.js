@@ -460,7 +460,18 @@ window.addEventListener('load', async () => {
 		const targetCtx = useGuide ? stepCtx : ctx;
 		const width = targetCanvas.width;
 		const height = targetCanvas.height;
-		const imageData = targetCtx.getImageData(0, 0, width, height);
+		// Build a composite snapshot for region detection so fills respect all visible strokes
+		const analysisCanvas = document.createElement('canvas');
+		analysisCanvas.width = width; analysisCanvas.height = height;
+		const analysisCtx = analysisCanvas.getContext('2d');
+		analysisCtx.globalCompositeOperation = 'source-over';
+		analysisCtx.drawImage(drawingCanvas, 0, 0);
+		analysisCtx.drawImage(remoteCanvas, 0, 0);
+		if (useGuide) {
+			analysisCtx.drawImage(stepCanvas, 0, 0);
+			analysisCtx.drawImage(remoteStepCanvas, 0, 0);
+		}
+		const imageData = analysisCtx.getImageData(0, 0, width, height);
 		const data = imageData.data;
 		const sx = Math.floor(startX);
 		const sy = Math.floor(startY);
@@ -824,9 +835,10 @@ window.addEventListener('load', async () => {
 			pendingFill = null;
 			fillPointerId = null;
 			if (!pinchState) {
-				socket.emit('fill', data);
 				floodFill(data);
-				socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
+				if (!isGuideMode) {
+					socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
+				}
 			}
 		}
 
