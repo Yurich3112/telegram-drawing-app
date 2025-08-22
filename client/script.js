@@ -355,11 +355,13 @@ window.addEventListener('load', async () => {
 		const isEraser = tool === 'eraser';
 		const targetCtx = stroke.guide ? remoteStepCtx : remoteCtx;
 		targetCtx.save();
-		targetCtx.globalCompositeOperation = stroke.guide && isEraser ? 'destination-out' : 'source-over';
+		// Use destination-out for eraser so receivers actually remove pixels from their overlay buffers
+		targetCtx.globalCompositeOperation = isEraser ? 'destination-out' : 'source-over';
 		targetCtx.lineCap = 'round';
 		targetCtx.lineJoin = 'round';
 		targetCtx.lineWidth = size;
-		targetCtx.strokeStyle = isEraser && !stroke.guide ? '#ffffff' : color;
+		// Color is irrelevant under destination-out
+		targetCtx.strokeStyle = isEraser ? '#000000' : color;
 		targetCtx.beginPath();
 		if (points.length === 1) {
 			const p = points[0];
@@ -417,14 +419,15 @@ window.addEventListener('load', async () => {
 			targetCtx.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
 		}
 		// Set composite mode
-		if (isGuideMode && isEraser) targetCtx.globalCompositeOperation = 'destination-out';
+		if (isEraser) targetCtx.globalCompositeOperation = 'destination-out';
 		else targetCtx.globalCompositeOperation = 'source-over';
 		
 		targetCtx.beginPath();
 		targetCtx.lineCap = 'round';
 		targetCtx.lineJoin = 'round';
 		targetCtx.lineWidth = data.size;
-		targetCtx.strokeStyle = isEraser && !isGuideMode ? '#ffffff' : data.color;
+		// Color irrelevant when erasing
+		targetCtx.strokeStyle = isEraser ? '#000000' : data.color;
 		[lastX, lastY] = [data.x, data.y];
 		targetCtx.moveTo(lastX, lastY);
 		targetCtx.lineTo(lastX, lastY);

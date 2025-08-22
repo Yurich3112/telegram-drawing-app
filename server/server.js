@@ -92,6 +92,8 @@ io.on('connection', (socket) => {
     if (state.historyStep < state.history.length - 1) state.history = state.history.slice(0, state.historyStep + 1);
     state.history.push(dataUrl);
     state.historyStep++;
+    // Broadcast updated base to everyone so eraser effects are visible immediately
+    io.to(room).emit('loadCanvas', { dataUrl });
   });
 
   socket.on('undo', () => {
@@ -137,7 +139,8 @@ io.on('connection', (socket) => {
     if (!state.guide.active) return;
     try {
       state.guide.stepDataUrl = dataUrl || null;
-      io.to(room).emit('loadStepState', { dataUrl: state.guide.stepDataUrl });
+      // Do not broadcast on every stroke to avoid overwriting peers' in-progress step drawings
+      // New or reconnected clients will receive stepDataUrl via initState/guideSyncState
     } catch (_) {}
   });
 
