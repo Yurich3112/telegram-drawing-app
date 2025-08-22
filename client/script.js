@@ -1436,9 +1436,11 @@ window.addEventListener('load', async () => {
 
 	function exitGuideMode() {
 		if (isGuideMode) {
-			// Move all drawings from step canvas to main canvas
+			// Move all drawings from step canvas (local + remote) to main canvas
 			ctx.drawImage(stepCanvas, 0, 0);
+			ctx.drawImage(remoteStepCanvas, 0, 0);
 			stepCtx.clearRect(0, 0, stepCanvas.width, stepCanvas.height);
+			remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
 			
 			// Clear suggestion canvas
 			suggestionCtx.clearRect(0, 0, suggestionCanvas.width, suggestionCanvas.height);
@@ -1455,12 +1457,11 @@ window.addEventListener('load', async () => {
 			// Hide exit button
 			exitGuideModeBtn.classList.add('hidden');
 			
-			// Save the current state
-			socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
-			
-			render();
-			// Notify others to exit and clear suggestion overlays with a base snapshot
+			// Prepare authoritative base snapshot and save
 			const baseDataUrl = drawingCanvas.toDataURL();
+			socket.emit('saveState', { dataUrl: baseDataUrl });
+			render();
+			// Notify others to exit and apply this snapshot
 			socket.emit('guideExit', { baseDataUrl });
 		}
 	}
