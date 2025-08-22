@@ -53,6 +53,12 @@ window.addEventListener('load', async () => {
 	ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height);
 	ctx.restore();
 
+	// --- Preview canvas for local in-progress stroke ---
+	const previewCanvas = document.createElement('canvas');
+	previewCanvas.width = 2048;
+	previewCanvas.height = 2048;
+	const previewCtx = previewCanvas.getContext('2d');
+
 	// --- Bottom bar elements ---
 	const expansionPanel = document.getElementById('expansion-panel');
 	const panelTools = document.getElementById('panel-tools');
@@ -247,6 +253,8 @@ window.addEventListener('load', async () => {
 		displayCtx.setTransform(viewScale * dpr, 0, 0, viewScale * dpr, viewOffsetX * dpr, viewOffsetY * dpr);
 		displayCtx.imageSmoothingEnabled = false;
 		displayCtx.drawImage(drawingCanvas, 0, 0);
+		// Draw preview layer over base
+		displayCtx.drawImage(previewCanvas, 0, 0);
 		// Outline the drawing area for clear boundaries
 		displayCtx.save();
 		displayCtx.strokeStyle = 'rgba(0,0,0,0.6)';
@@ -313,24 +321,26 @@ window.addEventListener('load', async () => {
 
 	function handleStartDrawing(data) {
 		const isEraser = data.tool === 'eraser';
-		ctx.globalCompositeOperation = 'source-over';
-		ctx.beginPath();
-		ctx.lineCap = 'round';
-		ctx.lineJoin = 'round';
-		ctx.lineWidth = data.size;
-		ctx.strokeStyle = isEraser ? '#ffffff' : data.color;
+		// Clear preview before starting a new stroke
+		previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+		previewCtx.globalCompositeOperation = 'source-over';
+		previewCtx.beginPath();
+		previewCtx.lineCap = 'round';
+		previewCtx.lineJoin = 'round';
+		previewCtx.lineWidth = data.size;
+		previewCtx.strokeStyle = isEraser ? '#ffffff' : data.color;
 		[lastX, lastY] = [data.x, data.y];
-		ctx.moveTo(lastX, lastY);
-		ctx.lineTo(lastX, lastY);
-		ctx.stroke();
+		previewCtx.moveTo(lastX, lastY);
+		previewCtx.lineTo(lastX, lastY);
+		previewCtx.stroke();
 		render();
 	}
 
 	function handleDraw(data) {
 		const midX = (lastX + data.x) / 2;
 		const midY = (lastY + data.y) / 2;
-		ctx.quadraticCurveTo(lastX, lastY, midX, midY);
-		ctx.stroke();
+		previewCtx.quadraticCurveTo(lastX, lastY, midX, midY);
+		previewCtx.stroke();
 		[lastX, lastY] = [data.x, data.y];
 		render();
 	}
@@ -497,7 +507,7 @@ window.addEventListener('load', async () => {
 	// Remote stroke application (sent only after another user finishes a stroke)
 	socket.on('applyStroke', (stroke) => { applyStrokeFromServer(stroke); });
 	socket.on('fill', (data) => { floodFill(data); });
-	socket.on('clearCanvas', () => { ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height); render(); });
+	socket.on('clearCanvas', () => { ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height); previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height); render(); });
 
 	// No locking in the new model
 
@@ -508,6 +518,7 @@ window.addEventListener('load', async () => {
 			ctx.globalCompositeOperation = 'source-over';
 			ctx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
 			ctx.drawImage(img, 0, 0);
+			previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
 			render();
 		};
 	});
@@ -679,13 +690,11 @@ window.addEventListener('load', async () => {
 			// If no movement occurred and stroke not started, treat as dot tap
 			if (!strokeStarted && pendingStroke) {
 				beginStroke(pendingStroke);
-				handleStopDrawing();
-				// Emit full stroke with a single point
-				emitCompletedStroke();
-				socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
-			} else if (strokeStarted) {
-				isDrawing = false;
-				// Finish local stroke then emit once
+			}
+			if (strokeStarted) {
+				// Composite preview onto base, clear preview, then emit stroke
+				ctx.drawImage(previewCanvas, 0, 0);
+				previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
 				emitCompletedStroke();
 				socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
 			}
@@ -749,6 +758,7 @@ window.addEventListener('load', async () => {
 		ctx.globalCompositeOperation = 'source-over';
 		ctx.fillStyle = '#ffffff';
 		ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+		previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
 		render();
 		socket.emit('clearCanvas');
 		socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
