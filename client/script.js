@@ -146,6 +146,9 @@ window.addEventListener('load', async () => {
 	let drawingPointerId = null;
 	let pinchState = null;
 
+	// Track remote users' stroke states to avoid conflicts
+	const remoteStrokes = new Map(); // userId -> { lastX, lastY, color, size, tool, started }
+
 	// PC pan state
 	let isSpaceDown = false;
 	let isPanning = false;
@@ -161,6 +164,60 @@ window.addEventListener('load', async () => {
 	// Pending fill to avoid accidental fill during pinch/zoom
 	let pendingFill = null; // { startX, startY, color }
 	let fillPointerId = null;
+
+	// Drawing lock state
+	let isCanvasLocked = false;
+	let lockMessage = '';
+	let lockTimeout = null;
+
+	// Create notification element for lock messages
+	const notificationDiv = document.createElement('div');
+	notificationDiv.id = 'drawing-notification';
+	notificationDiv.style.cssText = `
+		position: fixed;
+		top: 20px;
+		left: 50%;
+		transform: translateX(-50%);
+		background: rgba(0, 0, 0, 0.8);
+		color: white;
+		padding: 12px 20px;
+		border-radius: 8px;
+		font-size: 14px;
+		z-index: 1000;
+		opacity: 0;
+		transition: opacity 0.3s ease;
+		pointer-events: none;
+		max-width: 300px;
+		text-align: center;
+	`;
+	document.body.appendChild(notificationDiv);
+
+	function showNotification(message, duration = 3000) {
+		notificationDiv.textContent = message;
+		notificationDiv.style.opacity = '1';
+		
+		if (lockTimeout) {
+			clearTimeout(lockTimeout);
+		}
+		
+		lockTimeout = setTimeout(() => {
+			notificationDiv.style.opacity = '0';
+		}, duration);
+	}
+
+	function updateCursor() {
+		if (isPanning || isSpaceDown) { 
+			displayCanvas.style.cursor = 'grab'; 
+			return; 
+		}
+		
+		if (isCanvasLocked) {
+			displayCanvas.style.cursor = 'not-allowed';
+			return;
+		}
+		
+		displayCanvas.style.cursor = currentTool === 'fill' ? 'pointer' : 'crosshair';
+	}
 
 	function clampScale(s) { return Math.min(MAX_SCALE, Math.max(MIN_SCALE, s)); }
 	function getDPR() { return window.devicePixelRatio || 1; }
@@ -226,6 +283,9 @@ window.addEventListener('load', async () => {
 	function handleDraw(data) {
 		const midX = (lastX + data.x) / 2;
 		const midY = (lastY + data.y) / 2;
+		// Begin a separate path per segment to prevent interference with remote paths
+		ctx.beginPath();
+		ctx.moveTo(lastX, lastY);
 		ctx.quadraticCurveTo(lastX, lastY, midX, midY);
 		ctx.stroke();
 		[lastX, lastY] = [data.x, data.y];
@@ -234,9 +294,52 @@ window.addEventListener('load', async () => {
 
 	function handleStopDrawing() { ctx.beginPath(); }
 
-	function updateCursor() {
-		if (isPanning || isSpaceDown) { displayCanvas.style.cursor = 'grab'; return; }
-		displayCanvas.style.cursor = currentTool === 'fill' ? 'pointer' : 'crosshair';
+	// --- Remote drawing handlers (per user) ---
+	function handleRemoteStartDrawing(data) {
+		const { userId, x, y, color, size, tool } = data;
+		const isEraser = tool === 'eraser';
+		remoteStrokes.set(userId, { lastX: x, lastY: y, color, size, tool, started: true });
+		// Draw initial dot without affecting local path
+		ctx.save();
+		ctx.globalCompositeOperation = 'source-over';
+		ctx.beginPath();
+		ctx.lineCap = 'round';
+		ctx.lineJoin = 'round';
+		ctx.lineWidth = size;
+		ctx.strokeStyle = isEraser ? '#ffffff' : color;
+		ctx.moveTo(x, y);
+		ctx.lineTo(x, y);
+		ctx.stroke();
+		ctx.restore();
+		render();
+	}
+
+	function handleRemoteDraw(data) {
+		const { userId, x, y } = data;
+		const s = remoteStrokes.get(userId);
+		if (!s || !s.started) return;
+		const midX = (s.lastX + x) / 2;
+		const midY = (s.lastY + y) / 2;
+		ctx.save();
+		ctx.globalCompositeOperation = 'source-over';
+		ctx.beginPath();
+		ctx.lineCap = 'round';
+		ctx.lineJoin = 'round';
+		ctx.lineWidth = s.size;
+		ctx.strokeStyle = s.tool === 'eraser' ? '#ffffff' : s.color;
+		ctx.moveTo(s.lastX, s.lastY);
+		ctx.quadraticCurveTo(s.lastX, s.lastY, midX, midY);
+		ctx.stroke();
+		ctx.restore();
+		s.lastX = x; s.lastY = y;
+		render();
+	}
+
+	function handleRemoteStopDrawing(data) {
+		const { userId } = data || {};
+		const s = userId ? remoteStrokes.get(userId) : null;
+		if (s) s.started = false;
+		// Ensure local path is not affected; no-op on ctx path
 	}
 
 	function switchTool(tool) {
@@ -396,11 +499,42 @@ window.addEventListener('load', async () => {
 	}
 
 	// Socket events
-	socket.on('startDrawing', (data) => { handleStartDrawing(data); });
-	socket.on('draw', (data) => { handleDraw(data); });
-	socket.on('stopDrawing', () => { handleStopDrawing(); });
+	socket.on('startDrawing', (data) => { handleRemoteStartDrawing(data); });
+	socket.on('draw', (data) => { handleRemoteDraw(data); });
+	socket.on('stopDrawing', (data) => { handleRemoteStopDrawing(data); });
 	socket.on('fill', (data) => { floodFill(data); });
 	socket.on('clearCanvas', () => { ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height); render(); });
+
+	// Drawing lock events
+	socket.on('drawingLocked', (data) => {
+		isCanvasLocked = true;
+		lockMessage = data.message;
+		showNotification(data.message, 4000);
+		updateCursor();
+		
+		// Add visual locked state
+		displayCanvas.classList.add('locked');
+		canvasContainer.classList.add('locked');
+		
+		// Cancel any pending drawing operations
+		if (isDrawing || pendingStroke) {
+			isDrawing = false;
+			pendingStroke = null;
+			strokeStarted = false;
+			drawingPointerId = null;
+		}
+	});
+
+	socket.on('drawingUnlocked', (data) => {
+		isCanvasLocked = false;
+		lockMessage = '';
+		showNotification(data.message, 2000);
+		updateCursor();
+		
+		// Remove visual locked state
+		displayCanvas.classList.remove('locked');
+		canvasContainer.classList.remove('locked');
+	});
 
 	socket.on('loadCanvas', ({ dataUrl }) => {
 		const img = new Image();
@@ -460,6 +594,18 @@ window.addEventListener('load', async () => {
 		socket.emit('startDrawing', data);
 	}
 
+	// Handle server rejection of drawing request
+	socket.on('drawingLocked', (data) => {
+		// If we were trying to start drawing, cancel it
+		if (strokeStarted && !isCanvasLocked) {
+			strokeStarted = false;
+			isDrawing = false;
+			pendingStroke = null;
+			drawingPointerId = null;
+			handleStopDrawing();
+		}
+	});
+
 	function onPointerDown(e) {
 		displayCanvas.setPointerCapture(e.pointerId);
 		activePointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
@@ -489,6 +635,13 @@ window.addEventListener('load', async () => {
 			// Cancel any pending fill during pinch
 			pendingFill = null;
 			fillPointerId = null;
+			return;
+		}
+
+		// Check if canvas is locked for drawing
+		if (isCanvasLocked && currentTool !== 'fill') {
+			showNotification('Canvas is locked. Please wait for the current drawing to finish.', 2000);
+			e.preventDefault();
 			return;
 		}
 
@@ -638,6 +791,10 @@ window.addEventListener('load', async () => {
 	redoBtn.addEventListener('click', () => socket.emit('redo'));
 
 	clearBtn.addEventListener('click', () => {
+		if (isCanvasLocked) {
+			showNotification('Please wait for the current drawing to finish before clearing.', 2000);
+			return;
+		}
 		ctx.globalCompositeOperation = 'source-over';
 		ctx.fillStyle = '#ffffff';
 		ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height);

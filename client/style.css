@@ -157,3 +157,44 @@ input[type="range"] { -webkit-appearance: none; appearance: none; width: min(60v
 #confirm-signature:hover { background-color: #2ecc71; }
 #confirm-signature:disabled { background-color: #95a5a6; cursor: not-allowed; }
 
+/* Drawing lock notification */
+#drawing-notification {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-size: 14px;
+    z-index: 1000;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+    max-width: 300px;
+    text-align: center;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* Canvas locked state */
+#drawing-canvas.locked {
+    cursor: not-allowed !important;
+    opacity: 0.8;
+    transition: opacity 0.3s ease;
+}
+
+/* Visual indicator for locked state */
+#canvas-container.locked::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 0, 0, 0.1);
+    pointer-events: none;
+    z-index: 10;
+    border-radius: 8px;
+}
+
