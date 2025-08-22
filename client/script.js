@@ -355,13 +355,13 @@ window.addEventListener('load', async () => {
 		const isEraser = tool === 'eraser';
 		const targetCtx = stroke.guide ? remoteStepCtx : remoteCtx;
 		targetCtx.save();
-		// Use destination-out for eraser so receivers actually remove pixels from their overlay buffers
-		targetCtx.globalCompositeOperation = isEraser ? 'destination-out' : 'source-over';
+		// In guide mode eraser truly erases from step overlay; in normal mode draw white on overlay
+		targetCtx.globalCompositeOperation = (stroke.guide && isEraser) ? 'destination-out' : 'source-over';
 		targetCtx.lineCap = 'round';
 		targetCtx.lineJoin = 'round';
 		targetCtx.lineWidth = size;
-		// Color is irrelevant under destination-out
-		targetCtx.strokeStyle = isEraser ? '#000000' : color;
+		// Color irrelevant under destination-out; for normal mode eraser use white
+		targetCtx.strokeStyle = (isEraser && !stroke.guide) ? '#ffffff' : color;
 		targetCtx.beginPath();
 		if (points.length === 1) {
 			const p = points[0];
@@ -419,15 +419,15 @@ window.addEventListener('load', async () => {
 			targetCtx.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
 		}
 		// Set composite mode
-		if (isEraser) targetCtx.globalCompositeOperation = 'destination-out';
+		if (isGuideMode && isEraser) targetCtx.globalCompositeOperation = 'destination-out';
 		else targetCtx.globalCompositeOperation = 'source-over';
 		
 		targetCtx.beginPath();
 		targetCtx.lineCap = 'round';
 		targetCtx.lineJoin = 'round';
 		targetCtx.lineWidth = data.size;
-		// Color irrelevant when erasing
-		targetCtx.strokeStyle = isEraser ? '#000000' : data.color;
+		// Normal mode eraser paints white into preview; guide mode eraser uses destination-out
+		targetCtx.strokeStyle = (isEraser && !isGuideMode) ? '#ffffff' : data.color;
 		[lastX, lastY] = [data.x, data.y];
 		targetCtx.moveTo(lastX, lastY);
 		targetCtx.lineTo(lastX, lastY);
@@ -755,6 +755,8 @@ window.addEventListener('load', async () => {
 			ctx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
 			ctx.drawImage(img, 0, 0);
 			previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+			// Clear remote overlay so it doesn't conflict with the fresh base
+			remoteCtx.clearRect(0, 0, remoteCanvas.width, remoteCanvas.height);
 			render();
 		};
 	});
