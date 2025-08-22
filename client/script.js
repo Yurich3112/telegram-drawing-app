@@ -569,25 +569,27 @@ window.addEventListener('load', async () => {
 			}
 		}
 
+		// Package the mask as a dataURL so others can apply the exact same fill region
 		tempCtx.putImageData(maskData, 0, 0);
 		tempCtx.globalCompositeOperation = 'source-in';
 		tempCtx.fillStyle = color;
 		tempCtx.fillRect(0, 0, width, height);
-		// If we have a suggestion shape drawn, try to clip to its alpha to avoid bleeding
-		if (useGuide) {
-			// Use suggestionCanvas alpha as a soft mask (approximation)
-			try {
-				targetCtx.save();
-				targetCtx.globalCompositeOperation = 'source-over';
-				targetCtx.drawImage(tempCanvas, 0, 0);
-				targetCtx.restore();
-			} catch (_) {
-				targetCtx.drawImage(tempCanvas, 0, 0);
-			}
-		} else {
-			targetCtx.drawImage(tempCanvas, 0, 0);
-		}
+		const dataUrl = tempCanvas.toDataURL();
+		// Apply locally
+		targetCtx.drawImage(tempCanvas, 0, 0);
 		render();
+		// Broadcast exact fill mask so receivers composite it identically
+		socket.emit('fill', { dataUrl, guide: useGuide });
+	}
+
+	function applyFillMaskImage({ dataUrl, guide }) {
+		const img = new Image();
+		img.onload = () => {
+			const targetCtx = guide ? remoteStepCtx : remoteCtx;
+			targetCtx.drawImage(img, 0, 0);
+			render();
+		};
+		img.src = dataUrl;
 	}
 
 	function updatePalette() {
@@ -620,7 +622,13 @@ window.addEventListener('load', async () => {
 	// Socket events
 	// Remote stroke application (sent only after another user finishes a stroke)
 	socket.on('applyStroke', (stroke) => { applyStrokeFromServer(stroke); });
-	socket.on('fill', (data) => { floodFill({ ...data, guide: !!data.guide }); });
+	socket.on('fill', (data) => {
+		if (data && data.dataUrl) {
+			applyFillMaskImage(data);
+		} else {
+			floodFill({ ...data, guide: !!data.guide });
+		}
+	});
 	socket.on('clearCanvas', () => { ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height); previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height); render(); });
 
 	// No locking in the new model
@@ -1238,25 +1246,40 @@ window.addEventListener('load', async () => {
 		const offsetX = (suggestionCanvas.width - svgWidth * scale) / 2;
 		const offsetY = (suggestionCanvas.height - svgHeight * scale) / 2;
 
-		// Set suggested color
+		// Set suggested color in palette but draw hint shapes using a pattern to add mystery
 		currentColor = group.color;
 		colorPicker.value = group.color;
 		colorSwatch.style.backgroundColor = group.color;
 		addColorToPalette(group.color);
 
-		// Draw shapes for current step
+		// Create grey pattern for suggestion shapes
+		const patternSize = 16;
+		const pat = document.createElement('canvas');
+		pat.width = patternSize; pat.height = patternSize;
+		const pctx = pat.getContext('2d');
+		pctx.fillStyle = '#b0b0b0';
+		pctx.fillRect(0, 0, patternSize, patternSize);
+		pctx.strokeStyle = '#8c8c8c';
+		pctx.lineWidth = 2;
+		pctx.beginPath();
+		pctx.moveTo(0, 0); pctx.lineTo(patternSize, patternSize);
+		pctx.moveTo(0, patternSize); pctx.lineTo(patternSize, 0);
+		pctx.stroke();
+		const fillPattern = suggestionCtx.createPattern(pat, 'repeat');
+
+		// Draw shapes for current step using the pattern
 		group.shapes.forEach(shapeData => {
-			drawSvgShape(suggestionCtx, shapeData.element, scale, offsetX, offsetY, group.color);
+			drawSvgShape(suggestionCtx, shapeData.element, scale, offsetX, offsetY, fillPattern, /*usePattern*/true);
 		});
 
 		guideStatus.textContent = `Step ${currentGuideStep + 1} of ${sortedColorGroups.length}: Color "${group.color}"`;
 		render();
 	}
 
-	function drawSvgShape(ctx, element, scale, offsetX, offsetY, color) {
+	function drawSvgShape(ctx, element, scale, offsetX, offsetY, color, usePattern = false) {
 		ctx.save();
 		ctx.fillStyle = color;
-		ctx.strokeStyle = color;
+		ctx.strokeStyle = usePattern ? '#666666' : color;
 		
 		switch (element.tagName.toLowerCase()) {
 			case 'rect':
