@@ -77,42 +77,51 @@ bot.on('inline_query', (query) => {
     const queryId = query.id;
     const roomName = query.query.trim();
 
-    // Якщо користувач нічого не ввів після імені бота, нічого не робимо
+    // Якщо користувач нічого не ввів, показуємо підказку
     if (!roomName) {
-        bot.answerInlineQuery(queryId, []).catch(console.error);
+        bot.answerInlineQuery(queryId, [{
+            type: 'article',
+            id: 'hint',
+            title: 'Enter a canvas name',
+            input_message_content: {
+                message_text: 'Please enter a name for the canvas after mentioning the bot.'
+            }
+        }]).catch(console.error);
         return;
     }
 
     // Створюємо URL для нашого веб-додатку з назвою кімнати
     const url = makeRoomUrl(roomName);
 
-    // Формуємо результат, який побачить користувач
+    // Формуємо результат спеціального типу 'web_app'
     const results = [
         {
-            type: 'article',
-            id: '1', // Унікальний ID для цього результату
-            title: `🎨 New Canvas "${roomName}"`,
-            description: 'Collaborative mode allows everyone to draw simultaneously on the same board.',
-            // Це те, що буде відправлено в чат, коли користувач натисне на результат
-            input_message_content: {
-                message_text: `Let's draw on the canvas: **${roomName}**!`,
-                parse_mode: 'Markdown'
-            },
-            // А це найголовніше - кнопка, що відкриває Mini App
+            // КЛЮЧОВА ЗМІНА: Використовуємо тип 'web_app' замість 'article'
+            type: 'web_app',
+            id: '1', // Унікальний ID
+            title: `🎨 New Canvas: ${roomName}`, // Заголовок, який бачить користувач
+            
+            // Прямо вказуємо, який Mini App відкрити
+            web_app: { url: url },
+
+            // Необов'язково: можна додати кнопку до повідомлення,
+            // яке буде відправлено в чат після запуску додатку
             reply_markup: {
                 inline_keyboard: [
                     [
                         {
-                            text: '🚀 Open Canvas',
+                            text: `🚀 Open "${roomName}" Again`,
                             web_app: { url: url }
                         }
                     ]
                 ]
             },
-            // Можна додати іконку для краси
-            thumbnail_url: 'https://i.imgur.com/TZeA09j.png', // Приклад іконки, замініть на свою
-            thumbnail_width: 64,
-            thumbnail_height: 64
+            // Необов'язково: повідомлення, яке бот опублікує від імені користувача
+            input_message_content: {
+                 message_text: `I've created a new canvas: **${roomName}**`,
+                 parse_mode: 'Markdown'
+            },
+            thumbnail_url: 'https://i.imgur.com/TZeA09j.png', // Іконка (замініть на свою)
         }
     ];
 
