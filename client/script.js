@@ -164,6 +164,9 @@ window.addEventListener('load', async () => {
 	let sortedColorGroups = [];
 	let loadedSvgDocument = null;
 	let currentSvgPath = null;
+	let mountedSvgRoot = null; // SVG element mounted in hidden DOM for computed styles/bbox
+	let guideHiddenHost = null; // Hidden host div
+	let loadedSvgViewBox = null; // {minX, minY, width, height}
 	let MIN_SCALE = 0.02;
 	const MAX_SCALE = 8;
 
@@ -917,11 +920,40 @@ window.addEventListener('load', async () => {
 			return;
 		}
 
-		loadedSvgDocument = svgElement;
+		// Mount a cloned SVG into a hidden host so computed styles and getBBox work
+		cleanupMountedSvg();
+		guideHiddenHost = document.createElement('div');
+		guideHiddenHost.style.position = 'fixed';
+		guideHiddenHost.style.left = '-10000px';
+		guideHiddenHost.style.top = '-10000px';
+		guideHiddenHost.style.width = '0';
+		guideHiddenHost.style.height = '0';
+		guideHiddenHost.style.overflow = 'hidden';
+		mountedSvgRoot = svgElement.cloneNode(true);
+		// Ensure the SVG has displayable size; if missing, use viewBox or defaults
+		const vb = mountedSvgRoot.getAttribute('viewBox');
+		if (vb) {
+			const parts = vb.split(/\s+/).map(Number);
+			if (parts.length === 4 && parts.every(n => !isNaN(n))) {
+				loadedSvgViewBox = { minX: parts[0], minY: parts[1], width: parts[2], height: parts[3] };
+			}
+		}
+		if (!mountedSvgRoot.getAttribute('width') || !mountedSvgRoot.getAttribute('height')) {
+			const w = loadedSvgViewBox ? loadedSvgViewBox.width : 1000;
+			const h = loadedSvgViewBox ? loadedSvgViewBox.height : 1000;
+			mountedSvgRoot.setAttribute('width', String(w));
+			mountedSvgRoot.setAttribute('height', String(h));
+		}
+		guideHiddenHost.appendChild(mountedSvgRoot);
+		document.body.appendChild(guideHiddenHost);
+
+		loadedSvgDocument = mountedSvgRoot;
 		extractAndSortShapes();
 		
 		if (sortedColorGroups.length === 0) {
 			guideStatus.textContent = 'No shapes found in SVG';
+			// Still allow exit and cleanup
+			cleanupMountedSvg();
 			return;
 		}
 
@@ -939,17 +971,14 @@ window.addEventListener('load', async () => {
 		const groupedShapes = {};
 
 		rawShapes.forEach(shape => {
-			let color = getEffectiveColor(shape);
-			if (!color || color === 'none') return;
-			
-			color = color.toLowerCase().trim();
-			let area = calculateShapeArea(shape);
-
+			const color = getEffectiveColor(shape);
+			if (!color) return;
+			const normalized = color.toLowerCase().trim();
+			if (normalized === 'none' || normalized === 'transparent' || normalized === 'rgba(0, 0, 0, 0)') return;
+			const area = calculateShapeArea(shape);
 			if (area > 0) {
-				if (!groupedShapes[color]) {
-					groupedShapes[color] = [];
-				}
-				groupedShapes[color].push({ element: shape, area: area });
+				if (!groupedShapes[normalized]) groupedShapes[normalized] = [];
+				groupedShapes[normalized].push({ element: shape, area });
 			}
 		});
 
@@ -964,21 +993,28 @@ window.addEventListener('load', async () => {
 	}
 
 	function getEffectiveColor(element) {
+		// Prefer inline attributes if present
 		let color = element.getAttribute('fill');
 		if (color && color !== 'none') return color;
-
 		color = element.getAttribute('stroke');
 		if (color && color !== 'none') return color;
-
+		// Walk up ancestors to inherit fill/stroke if specified
+		let ancestor = element.parentElement;
+		while (ancestor && ancestor !== loadedSvgDocument) {
+			let ancFill = ancestor.getAttribute && ancestor.getAttribute('fill');
+			if (ancFill && ancFill !== 'none') return ancFill;
+			let ancStroke = ancestor.getAttribute && ancestor.getAttribute('stroke');
+			if (ancStroke && ancStroke !== 'none') return ancStroke;
+			ancestor = ancestor.parentElement;
+		}
+		// Fallback to computed style (requires mountedSVG in DOM)
 		try {
 			const computedStyle = window.getComputedStyle(element);
 			color = computedStyle.getPropertyValue('fill');
 			if (color && color !== 'none' && color !== 'rgba(0, 0, 0, 0)') return color;
-			
 			color = computedStyle.getPropertyValue('stroke');
 			if (color && color !== 'none' && color !== 'rgba(0, 0, 0, 0)') return color;
-		} catch (e) {}
-
+		} catch (_) {}
 		return null;
 	}
 
@@ -1078,9 +1114,23 @@ window.addEventListener('load', async () => {
 		const tempCanvas = document.createElement('canvas');
 		const tempCtx = tempCanvas.getContext('2d');
 		
-		// Get SVG dimensions
-		const svgWidth = loadedSvgDocument.width?.baseVal?.value || 100;
-		const svgHeight = loadedSvgDocument.height?.baseVal?.value || 100;
+		// Get SVG dimensions using width/height or viewBox/bbox
+		let svgWidth = loadedSvgDocument.width && loadedSvgDocument.width.baseVal ? loadedSvgDocument.width.baseVal.value : null;
+		let svgHeight = loadedSvgDocument.height && loadedSvgDocument.height.baseVal ? loadedSvgDocument.height.baseVal.value : null;
+		if ((!svgWidth || !svgHeight) && loadedSvgViewBox) {
+			svgWidth = loadedSvgViewBox.width;
+			svgHeight = loadedSvgViewBox.height;
+		}
+		if (!svgWidth || !svgHeight) {
+			// Fallback to bbox of the whole svg content
+			try {
+				const bbox = loadedSvgDocument.getBBox();
+				svgWidth = bbox.width || 1000;
+				svgHeight = bbox.height || 1000;
+			} catch (_) {
+				svgWidth = 1000; svgHeight = 1000;
+			}
+		}
 		
 		// Calculate scale to fit in our canvas
 		const scale = Math.min(suggestionCanvas.width / svgWidth, suggestionCanvas.height / svgHeight) * 0.8;
@@ -1148,14 +1198,22 @@ window.addEventListener('load', async () => {
 				}
 				break;
 			case 'path':
-				// For paths, we'll use a simplified approach
-				// In a real implementation, you'd parse the path data
-				const bbox = element.getBBox();
-				const px = bbox.x * scale + offsetX;
-				const py = bbox.y * scale + offsetY;
-				const pw = bbox.width * scale;
-				const ph = bbox.height * scale;
-				ctx.fillRect(px, py, pw, ph);
+				// Render a path using Path2D if available
+				try {
+					const d = element.getAttribute('d');
+					if (d && window.Path2D) {
+						const p = new Path2D(d);
+						ctx.translate(offsetX, offsetY);
+						ctx.scale(scale, scale);
+						ctx.fill(p);
+					} else {
+						const bbox = element.getBBox();
+						ctx.fillRect(bbox.x * scale + offsetX, bbox.y * scale + offsetY, bbox.width * scale, bbox.height * scale);
+					}
+				} catch (_) {
+					const bbox = element.getBBox();
+					ctx.fillRect(bbox.x * scale + offsetX, bbox.y * scale + offsetY, bbox.width * scale, bbox.height * scale);
+				}
 				break;
 		}
 		
@@ -1187,6 +1245,8 @@ window.addEventListener('load', async () => {
 			sortedColorGroups = [];
 			loadedSvgDocument = null;
 			currentSvgPath = null;
+			loadedSvgViewBox = null;
+			cleanupMountedSvg();
 			
 			// Hide exit button
 			exitGuideModeBtn.classList.add('hidden');
@@ -1196,6 +1256,14 @@ window.addEventListener('load', async () => {
 			
 			render();
 		}
+	}
+
+	function cleanupMountedSvg() {
+		if (guideHiddenHost) {
+			try { document.body.removeChild(guideHiddenHost); } catch (_) {}
+		}
+		guideHiddenHost = null;
+		mountedSvgRoot = null;
 	}
 
 	// Initial
