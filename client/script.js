@@ -646,7 +646,9 @@ window.addEventListener('load', async () => {
 		// Commit any remote step drawings into our base if we have our own step visible
 		if (isGuideMode) {
 			ctx.drawImage(stepCanvas, 0, 0);
+			ctx.drawImage(remoteStepCanvas, 0, 0);
 			stepCtx.clearRect(0, 0, stepCanvas.width, stepCanvas.height);
+			remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
 		}
 		// Merge sender base snapshot if provided (ensures everyone aligns)
 		if (baseDataUrl) {
@@ -674,8 +676,12 @@ window.addEventListener('load', async () => {
 
 	socket.on('guideExit', ({ baseDataUrl }) => {
 		// Clear suggestion and remote step overlay
-		suggestionCtx.clearRect(0, 0, suggestionCanvas.width, suggestionCanvas.height);
+		// Before clearing, merge any step layers into base
+		ctx.drawImage(stepCanvas, 0, 0);
+		ctx.drawImage(remoteStepCanvas, 0, 0);
+		stepCtx.clearRect(0, 0, stepCanvas.width, stepCanvas.height);
 		remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
+		suggestionCtx.clearRect(0, 0, suggestionCanvas.width, suggestionCanvas.height);
 		// Merge base snapshot if provided
 		if (baseDataUrl) {
 			try {
@@ -1244,7 +1250,9 @@ window.addEventListener('load', async () => {
 			// Move current step drawing to base canvas
 			if (currentGuideStep >= 0) {
 				ctx.drawImage(stepCanvas, 0, 0);
+				ctx.drawImage(remoteStepCanvas, 0, 0);
 				stepCtx.clearRect(0, 0, stepCanvas.width, stepCanvas.height);
+				remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
 			}
 
 			currentGuideStep++;
@@ -1253,15 +1261,19 @@ window.addEventListener('load', async () => {
 			
 			// Clear remote guide buffer for the new step to avoid stale overlays and sync commit
 			remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
-			// Emit commit-and-goto with base snapshot so others move current drawings to base
-			const baseDataUrl = drawingCanvas.toDataURL();
-			socket.emit('guideCommitAndGotoStep', { step: currentGuideStep, svgPath: currentSvgPath, baseDataUrl });
+			// Emit commit-and-goto so others also commit and switch overlay
+			socket.emit('guideCommitAndGotoStep', { step: currentGuideStep, svgPath: currentSvgPath });
 			initStepHistory();
 		}
 	}
 
 	function showPreviousStep() {
 		if (currentGuideStep > -1) {
+			// Commit both local and remote step layers before moving
+			ctx.drawImage(stepCanvas, 0, 0);
+			ctx.drawImage(remoteStepCanvas, 0, 0);
+			stepCtx.clearRect(0, 0, stepCanvas.width, stepCanvas.height);
+			remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
 			currentGuideStep--;
 			renderCurrentStep();
 			updateGuideControls();
