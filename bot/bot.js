@@ -73,12 +73,19 @@ bot.onText(/^\/draw(?:@\w+)?$/, async (msg) => {
 });
 
 // --- НОВИЙ КОД: Обробка inline-запитів ---
+// Отримайте ім'я користувача бота з env-змінних
+const botUsername = process.env.TELEGRAM_BOT_USERNAME;
+if (!botUsername) {
+    console.error("TELEGRAM_BOT_USERNAME is not set in your .env file!");
+    process.exit(1);
+}
+
 bot.on('inline_query', (query) => {
     const queryId = query.id;
     const roomName = query.query.trim();
 
-    // Якщо користувач нічого не ввів, показуємо підказку
     if (!roomName) {
+        // Якщо запит порожній, показуємо підказку
         bot.answerInlineQuery(queryId, [{
             type: 'article',
             id: 'hint',
@@ -86,45 +93,37 @@ bot.on('inline_query', (query) => {
             input_message_content: {
                 message_text: 'Please enter a name for the canvas after mentioning the bot.'
             }
-        }]).catch(console.error);
+        }], { cache_time: 10 }).catch(console.error);
         return;
     }
 
-    // Створюємо URL для нашого веб-додатку з назвою кімнати
-    const url = makeRoomUrl(roomName);
+    // Створюємо payload для deep-link. Ваш script.js очікує 'r_ROOMNAME'
+    const startAppPayload = makeStartAppPayload(roomName);
+    
+    // Формуємо пряме посилання на Mini App
+    // Формат: https://t.me/USERNAME_BOT/APP_SHORT_NAME?startapp=PAYLOAD
+    // APP_SHORT_NAME - це те, що ви вказали в BotFather (наприклад, 'draw')
+    const appDirectUrl = `https://t.me/${botUsername}/draw?startapp=${startAppPayload}`;
 
-    // Формуємо результат спеціального типу 'web_app'
     const results = [
         {
-            // КЛЮЧОВА ЗМІНА: Використовуємо тип 'web_app' замість 'article'
-            type: 'web_app',
-            id: '1', // Унікальний ID
-            title: `🎨 New Canvas: ${roomName}`, // Заголовок, який бачить користувач
+            type: 'article',
+            id: '1',
+            title: `🎨 New Board "${roomName}"`,
+            description: 'Collaborative mode allows everyone to draw simultaneously on the same board.',
             
-            // Прямо вказуємо, який Mini App відкрити
-            web_app: { url: url },
-
-            // Необов'язково: можна додати кнопку до повідомлення,
-            // яке буде відправлено в чат після запуску додатку
-            reply_markup: {
-                inline_keyboard: [
-                    [
-                        {
-                            text: `🚀 Open "${roomName}" Again`,
-                            web_app: { url: url }
-                        }
-                    ]
-                ]
-            },
-            // Необов'язково: повідомлення, яке бот опублікує від імені користувача
+            // Ось магія: ми просто надсилаємо повідомлення з прямим посиланням.
+            // Telegram сам створить гарний попередній перегляд з кнопкою.
             input_message_content: {
-                 message_text: `I've created a new canvas: **${roomName}**`,
-                 parse_mode: 'Markdown'
+                message_text: `Board "**${roomName}**"\n${appDirectUrl}`,
+                parse_mode: 'Markdown'
             },
-            thumbnail_url: 'https://i.imgur.com/TZeA09j.png', // Іконка (замініть на свою)
+            
+            // Нам більше не потрібен reply_markup тут
+            
+            thumbnail_url: 'https://i.imgur.com/TZeA09j.png' // Ваша іконка
         }
     ];
 
-    // Надсилаємо відповідь на запит Telegram
     bot.answerInlineQuery(queryId, results, { cache_time: 0 }).catch(console.error);
 });
