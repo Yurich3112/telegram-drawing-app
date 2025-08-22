@@ -136,7 +136,7 @@ bot.on('inline_query', (query) => {
                 message_text: `Board: <b><a href="${safeUrl}">${safeRoomName}</a></b>`,
                 parse_mode: 'HTML',
                 // Вимикаємо попередній перегляд самого посилання, бо воно вже вбудоване
-                disable_web_page_preview: true
+                disable_web_page_preview: false
             },
             
             thumbnail_url: 'https://i.imgur.com/TZeA09j.png'
