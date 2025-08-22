@@ -73,19 +73,26 @@ bot.onText(/^\/draw(?:@\w+)?$/, async (msg) => {
 });
 
 // --- НОВИЙ КОД: Обробка inline-запитів ---
-// Отримайте ім'я користувача бота з env-змінних
 const botUsername = process.env.TELEGRAM_BOT_USERNAME;
 if (!botUsername) {
     console.error("TELEGRAM_BOT_USERNAME is not set in your .env file!");
     process.exit(1);
 }
 
+// Функція-помічник для екранування HTML-тегів у тексті від користувача
+function escapeHtml(text) {
+    return text
+         .replace(/&/g, "&amp;")
+         .replace(/</g, "&lt;")
+         .replace(/>/g, "&gt;");
+}
+
+
 bot.on('inline_query', (query) => {
     const queryId = query.id;
     const roomName = query.query.trim();
 
     if (!roomName) {
-        // Якщо запит порожній, показуємо підказку
         bot.answerInlineQuery(queryId, [{
             type: 'article',
             id: 'hint',
@@ -97,13 +104,11 @@ bot.on('inline_query', (query) => {
         return;
     }
 
-    // Створюємо payload для deep-link. Ваш script.js очікує 'r_ROOMNAME'
     const startAppPayload = makeStartAppPayload(roomName);
-    
-    // Формуємо пряме посилання на Mini App
-    // Формат: https://t.me/USERNAME_BOT/APP_SHORT_NAME?startapp=PAYLOAD
-    // APP_SHORT_NAME - це те, що ви вказали в BotFather (наприклад, 'draw')
     const appDirectUrl = `https://t.me/${botUsername}/draw?startapp=${startAppPayload}`;
+
+    // Екрануємо назву кімнати перед вставкою в HTML
+    const safeRoomName = escapeHtml(roomName);
 
     const results = [
         {
@@ -112,16 +117,13 @@ bot.on('inline_query', (query) => {
             title: `🎨 New Board "${roomName}"`,
             description: 'Collaborative mode allows everyone to draw simultaneously on the same board.',
             
-            // Ось магія: ми просто надсилаємо повідомлення з прямим посиланням.
-            // Telegram сам створить гарний попередній перегляд з кнопкою.
             input_message_content: {
-                message_text: `Board "**${roomName}**"\n${appDirectUrl}`,
-                parse_mode: 'Markdown'
+                // КЛЮЧОВА ЗМІНА: Використовуємо HTML для форматування
+                message_text: `Board <b>${safeRoomName}</b>\n${appDirectUrl}`,
+                parse_mode: 'HTML' // <-- Змінено з Markdown на HTML
             },
             
-            // Нам більше не потрібен reply_markup тут
-            
-            thumbnail_url: 'https://i.imgur.com/TZeA09j.png' // Ваша іконка
+            thumbnail_url: 'https://i.imgur.com/TZeA09j.png'
         }
     ];
 
