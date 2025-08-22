@@ -167,6 +167,42 @@ window.addEventListener('load', async () => {
 	let mountedSvgRoot = null; // SVG element mounted in hidden DOM for computed styles/bbox
 	let guideHiddenHost = null; // Hidden host div
 	let loadedSvgViewBox = null; // {minX, minY, width, height}
+
+	// Guide step history for undo/redo (local only)
+	const MAX_STEP_HISTORY = 30;
+	let stepHistory = [];
+	let stepHistoryIndex = -1;
+
+	function initStepHistory() {
+		stepHistory = [];
+		stepHistoryIndex = -1;
+		pushStepSnapshot();
+	}
+
+	function pushStepSnapshot() {
+		try {
+			const img = stepCtx.getImageData(0, 0, stepCanvas.width, stepCanvas.height);
+			// Truncate redo branch
+			if (stepHistoryIndex < stepHistory.length - 1) {
+				stepHistory = stepHistory.slice(0, stepHistoryIndex + 1);
+			}
+			stepHistory.push(img);
+			if (stepHistory.length > MAX_STEP_HISTORY) {
+				stepHistory.shift();
+			} else {
+				stepHistoryIndex++;
+			}
+		} catch (_) {}
+	}
+
+	function restoreStepSnapshot(index) {
+		if (index < 0 || index >= stepHistory.length) return;
+		const img = stepHistory[index];
+		try {
+			stepCtx.putImageData(img, 0, 0);
+			render();
+		} catch (_) {}
+	}
 	let MIN_SCALE = 0.02;
 	const MAX_SCALE = 8;
 
@@ -359,9 +395,13 @@ window.addEventListener('load', async () => {
 		const targetCtx = isGuideMode ? stepCtx : previewCtx;
 		const targetCanvas = isGuideMode ? stepCanvas : previewCanvas;
 		
-		// Clear preview before starting a new stroke
-		targetCtx.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
-		targetCtx.globalCompositeOperation = 'source-over';
+		// Clear preview only in normal mode; in guide mode we must preserve previous strokes
+		if (!isGuideMode) {
+			targetCtx.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
+		}
+		// Set composite mode (eraser in guide mode should erase to transparent)
+		if (isGuideMode && isEraser) targetCtx.globalCompositeOperation = 'destination-out';
+		else targetCtx.globalCompositeOperation = 'source-over';
 		targetCtx.beginPath();
 		targetCtx.lineCap = 'round';
 		targetCtx.lineJoin = 'round';
@@ -382,6 +422,7 @@ window.addEventListener('load', async () => {
 		targetCtx.stroke();
 		[lastX, lastY] = [data.x, data.y];
 		render();
+		// After finishing a continuous stroke (pointerup), we push a snapshot; here we can debounce but keep simple
 	}
 
 	function handleStopDrawing() { ctx.beginPath(); }
@@ -757,9 +798,10 @@ window.addEventListener('load', async () => {
 			}
 			if (strokeStarted) {
 				if (isGuideMode) {
-					// In guide mode, keep the drawing on the step canvas
+					// In guide mode, persist strokes on step canvas; also broadcast for spectators
 					emitCompletedStroke();
-					// Don't save state in guide mode until moving to next step
+					// Do not clear stepCanvas and do not save to base yet
+					pushStepSnapshot();
 				} else {
 					// Normal mode: composite preview onto base
 					ctx.drawImage(previewCanvas, 0, 0);
@@ -821,8 +863,8 @@ window.addEventListener('load', async () => {
 	colorPicker.addEventListener('input', (e) => { currentColor = e.target.value; colorSwatch.style.backgroundColor = currentColor; });
 	brushSize.addEventListener('input', (e) => { currentSize = Number(e.target.value); sizeDot.style.width = sizeDot.style.height = Math.max(8, Math.min(32, currentSize)) + 'px'; });
 
-	undoBtn.addEventListener('click', () => socket.emit('undo'));
-	redoBtn.addEventListener('click', () => socket.emit('redo'));
+	undoBtn.addEventListener('click', handleUndo);
+	redoBtn.addEventListener('click', handleRedo);
 
 	clearBtn.addEventListener('click', () => {
 		ctx.globalCompositeOperation = 'source-over';
@@ -833,6 +875,28 @@ window.addEventListener('load', async () => {
 		socket.emit('clearCanvas');
 		socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
 	});
+
+	function handleUndo() {
+		if (isGuideMode) {
+			if (stepHistoryIndex > 0) {
+				stepHistoryIndex--;
+				restoreStepSnapshot(stepHistoryIndex);
+			}
+			return;
+		}
+		socket.emit('undo');
+	}
+
+	function handleRedo() {
+		if (isGuideMode) {
+			if (stepHistoryIndex < stepHistory.length - 1) {
+				stepHistoryIndex++;
+				restoreStepSnapshot(stepHistoryIndex);
+			}
+			return;
+		}
+		socket.emit('redo');
+	}
 
 	// Guide mode event listeners
 	const guideModeBtn = document.getElementById('guide-mode-btn');
@@ -964,6 +1028,8 @@ window.addEventListener('load', async () => {
 		updateGuideControls();
 		exitGuideModeBtn.classList.remove('hidden');
 		render();
+		// Initialize per-step undo history
+		initStepHistory();
 	}
 
 	function extractAndSortShapes() {
@@ -1083,6 +1149,8 @@ window.addEventListener('load', async () => {
 			
 			// Emit to other players
 			socket.emit('guideStepChange', { step: currentGuideStep, svgPath: currentSvgPath });
+			// Reset history for new step
+			initStepHistory();
 		}
 	}
 
@@ -1094,6 +1162,7 @@ window.addEventListener('load', async () => {
 			
 			// Emit to other players
 			socket.emit('guideStepChange', { step: currentGuideStep, svgPath: currentSvgPath });
+			initStepHistory();
 		}
 	}
 
