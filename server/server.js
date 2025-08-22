@@ -12,7 +12,7 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// Serve client unconditionally
+// Serve client unconditionally (for now)
 app.get('/', (req, res) => {
   return res.sendFile(path.join(__dirname, '..', 'client', 'index.html'));
 });

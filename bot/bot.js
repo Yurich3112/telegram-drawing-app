@@ -71,3 +71,51 @@ bot.onText(/^\/draw(?:@\w+)?$/, async (msg) => {
 
     bot.sendMessage(chatId, `Launch Mini App: ${startAppLink}`).catch(console.error);
 });
+
+// --- НОВИЙ КОД: Обробка inline-запитів ---
+bot.on('inline_query', (query) => {
+    const queryId = query.id;
+    const roomName = query.query.trim();
+
+    // Якщо користувач нічого не ввів після імені бота, нічого не робимо
+    if (!roomName) {
+        bot.answerInlineQuery(queryId, []).catch(console.error);
+        return;
+    }
+
+    // Створюємо URL для нашого веб-додатку з назвою кімнати
+    const url = makeRoomUrl(roomName);
+
+    // Формуємо результат, який побачить користувач
+    const results = [
+        {
+            type: 'article',
+            id: '1', // Унікальний ID для цього результату
+            title: `🎨 New Canvas "${roomName}"`,
+            description: 'Collaborative mode allows everyone to draw simultaneously on the same board.',
+            // Це те, що буде відправлено в чат, коли користувач натисне на результат
+            input_message_content: {
+                message_text: `Let's draw on the canvas: **${roomName}**!`,
+                parse_mode: 'Markdown'
+            },
+            // А це найголовніше - кнопка, що відкриває Mini App
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        {
+                            text: '🚀 Open Canvas',
+                            web_app: { url: url }
+                        }
+                    ]
+                ]
+            },
+            // Можна додати іконку для краси
+            thumbnail_url: 'https://i.imgur.com/TZeA09j.png', // Приклад іконки, замініть на свою
+            thumbnail_width: 64,
+            thumbnail_height: 64
+        }
+    ];
+
+    // Надсилаємо відповідь на запит Telegram
+    bot.answerInlineQuery(queryId, results, { cache_time: 0 }).catch(console.error);
+});
