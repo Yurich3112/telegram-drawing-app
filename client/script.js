@@ -603,6 +603,19 @@ window.addEventListener('load', async () => {
 		img.src = dataUrl;
 	}
 
+	function composeCurrentStepLayerDataUrl() {
+		try {
+			const tmp = document.createElement('canvas');
+			tmp.width = stepCanvas.width; tmp.height = stepCanvas.height;
+			const tctx = tmp.getContext('2d');
+			tctx.drawImage(stepCanvas, 0, 0);
+			tctx.drawImage(remoteStepCanvas, 0, 0);
+			return tmp.toDataURL();
+		} catch (_) {
+			return stepCanvas.toDataURL();
+		}
+	}
+
 	function updatePalette() {
 		paletteContainer.innerHTML = '';
 		recentColors.forEach(color => {
@@ -641,8 +654,34 @@ window.addEventListener('load', async () => {
 		}
 	});
 
+	// Initial full state sync on connect
+	socket.on('initState', async ({ baseDataUrl, guide }) => {
+		try {
+			if (baseDataUrl) {
+				const img = new Image();
+				img.onload = () => { ctx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height); ctx.drawImage(img, 0, 0); render(); };
+				img.src = baseDataUrl;
+			}
+			if (guide && guide.active && guide.svgPath) {
+				await loadSvgForGuide(guide.svgPath);
+				currentGuideStep = typeof guide.step === 'number' ? guide.step : -1;
+				renderCurrentStep();
+				updateGuideControls();
+				if (guide.stepDataUrl) {
+					const sImg = new Image();
+					sImg.onload = () => { stepCtx.clearRect(0, 0, stepCanvas.width, stepCanvas.height); remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height); stepCtx.drawImage(sImg, 0, 0); render(); initStepHistory(); };
+					sImg.src = guide.stepDataUrl;
+				} else {
+					stepCtx.clearRect(0, 0, stepCanvas.width, stepCanvas.height);
+					remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
+					initStepHistory();
+				}
+			}
+		} catch (_) {}
+	});
+
 	// Guide synchronization
-	socket.on('guideCommitAndGotoStep', async ({ step, svgPath, baseDataUrl, suggestionLayer }) => {
+	socket.on('guideCommitAndGotoStep', async ({ step, svgPath, baseDataUrl }) => {
 		// Commit any remote step drawings into our base if we have our own step visible
 		if (isGuideMode) {
 			ctx.drawImage(stepCanvas, 0, 0);
@@ -669,20 +708,7 @@ window.addEventListener('load', async () => {
 			} catch (_) {}
 		}
 		currentGuideStep = step;
-		
-		// Update suggestion layer if provided
-		if (suggestionLayer) {
-			const img = new Image();
-			img.onload = () => {
-				suggestionCtx.clearRect(0, 0, suggestionCanvas.width, suggestionCanvas.height);
-				suggestionCtx.drawImage(img, 0, 0);
-				render();
-			};
-			img.src = suggestionLayer;
-		} else {
-			renderCurrentStep();
-		}
-		
+		renderCurrentStep();
 		updateGuideControls();
 		initStepHistory();
 	});
@@ -730,6 +756,49 @@ window.addEventListener('load', async () => {
 		};
 	});
 
+	// Receive authoritative guide step layer snapshot and apply only to the top step layer
+	socket.on('loadStepState', ({ dataUrl }) => {
+		if (!isGuideMode) return;
+		try {
+			stepCtx.clearRect(0, 0, stepCanvas.width, stepCanvas.height);
+			remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
+			if (dataUrl) {
+				const img = new Image();
+				img.onload = () => { stepCtx.drawImage(img, 0, 0); render(); initStepHistory(); };
+				img.src = dataUrl;
+			} else {
+				render();
+				initStepHistory();
+			}
+		} catch (_) {}
+	});
+
+	// On-demand guide state sync (in case of late joins or resizes)
+	socket.on('guideSyncState', (guide) => {
+		if (!guide || !guide.active) return;
+		if (!isGuideMode || currentSvgPath !== guide.svgPath) {
+			loadSvgForGuide(guide.svgPath).then(() => {
+				currentGuideStep = typeof guide.step === 'number' ? guide.step : currentGuideStep;
+				renderCurrentStep();
+				updateGuideControls();
+				if (guide.stepDataUrl) {
+					const img = new Image();
+					img.onload = () => { stepCtx.clearRect(0, 0, stepCanvas.width, stepCanvas.height); remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height); stepCtx.drawImage(img, 0, 0); render(); initStepHistory(); };
+					img.src = guide.stepDataUrl;
+				}
+			});
+		} else {
+			currentGuideStep = typeof guide.step === 'number' ? guide.step : currentGuideStep;
+			renderCurrentStep();
+			updateGuideControls();
+			if (guide.stepDataUrl) {
+				const img = new Image();
+				img.onload = () => { stepCtx.clearRect(0, 0, stepCanvas.width, stepCanvas.height); remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height); stepCtx.drawImage(img, 0, 0); render(); initStepHistory(); };
+				img.src = guide.stepDataUrl;
+			}
+		}
+	});
+
 	socket.on('updateUserList', (signatures) => {
 		userListDiv.innerHTML = '<h3>Who is here:</h3>';
 		signatures.forEach(sigUrl => {
@@ -738,53 +807,6 @@ window.addEventListener('load', async () => {
 			img.className = 'user-signature-img';
 			userListDiv.appendChild(img);
 		});
-	});
-
-	// Handle complete guide mode restoration from server
-	socket.on('restoreGuideMode', async ({ step, svgPath, suggestionLayer, stepCanvasData, sortedColorGroups }) => {
-		try {
-			// Load the SVG first
-			if (svgPath) {
-				const response = await fetch(svgPath);
-				const svgText = await response.text();
-				processSvgForGuide(svgText, svgPath, sortedColorGroups);
-			}
-			
-			// Restore guide mode state
-			currentGuideStep = step;
-			
-			// Restore suggestion layer if available
-			if (suggestionLayer) {
-				const img = new Image();
-				img.onload = () => {
-					suggestionCtx.clearRect(0, 0, suggestionCanvas.width, suggestionCanvas.height);
-					suggestionCtx.drawImage(img, 0, 0);
-					render();
-				};
-				img.src = suggestionLayer;
-			}
-			
-			// Restore step canvas if available
-			if (stepCanvasData) {
-				const img = new Image();
-				img.onload = () => {
-					stepCtx.clearRect(0, 0, stepCanvas.width, stepCanvas.height);
-					stepCtx.drawImage(img, 0, 0);
-					render();
-				};
-				img.src = stepCanvasData;
-			}
-			
-			// Update UI
-			isGuideMode = true;
-			updateGuideControls();
-			exitGuideModeBtn.classList.remove('hidden');
-			render();
-			
-			console.log('Guide mode restored successfully');
-		} catch (error) {
-			console.error('Error restoring guide mode:', error);
-		}
 	});
 
 	socket.on('guideStepSync', async ({ step, svgPath }) => {
@@ -806,95 +828,6 @@ window.addEventListener('load', async () => {
 			currentGuideStep = step;
 			renderCurrentStep();
 			updateGuideControls();
-		}
-	});
-
-	// Handle guide mode start from other clients
-	socket.on('guideStart', async ({ step, svgPath, suggestionLayer, sortedColorGroups }) => {
-		try {
-			if (svgPath) {
-				const response = await fetch(svgPath);
-				const svgText = await response.text();
-				processSvgForGuide(svgText, svgPath, sortedColorGroups);
-			}
-			
-			currentGuideStep = step;
-			isGuideMode = true;
-			
-			if (suggestionLayer) {
-				const img = new Image();
-				img.onload = () => {
-					suggestionCtx.clearRect(0, 0, suggestionCanvas.width, suggestionCanvas.height);
-					suggestionCtx.drawImage(img, 0, 0);
-					render();
-				};
-				img.src = suggestionLayer;
-			}
-			
-			updateGuideControls();
-			exitGuideModeBtn.classList.remove('hidden');
-			renderCurrentStep();
-		} catch (error) {
-			console.error('Error starting guide mode:', error);
-		}
-	});
-
-	// Handle suggestion layer updates
-	socket.on('guideSuggestionUpdate', ({ suggestionLayer }) => {
-		if (suggestionLayer) {
-			const img = new Image();
-			img.onload = () => {
-				suggestionCtx.clearRect(0, 0, suggestionCanvas.width, suggestionCanvas.height);
-				suggestionCtx.drawImage(img, 0, 0);
-				render();
-			};
-			img.src = suggestionLayer;
-		}
-	});
-
-	// Handle step canvas updates
-	socket.on('guideStepCanvasUpdate', ({ stepCanvasData }) => {
-		if (stepCanvasData) {
-			const img = new Image();
-			img.onload = () => {
-				stepCtx.clearRect(0, 0, stepCanvas.width, stepCanvas.height);
-				stepCtx.drawImage(img, 0, 0);
-				render();
-			};
-			img.src = stepCanvasData;
-		}
-	});
-
-	// Handle guide step clear
-	socket.on('guideClearStep', () => {
-		if (isGuideMode) {
-			stepCtx.clearRect(0, 0, stepCanvas.width, stepCanvas.height);
-			render();
-		}
-	});
-
-	// Handle guide step undo/redo
-	socket.on('guideStepUndo', ({ stepCanvasData }) => {
-		if (isGuideMode && stepCanvasData) {
-			const img = new Image();
-			img.onload = () => {
-				stepCtx.clearRect(0, 0, stepCanvas.width, stepCanvas.height);
-				stepCtx.drawImage(img, 0, 0);
-				render();
-			};
-			img.src = stepCanvasData;
-		}
-	});
-
-	socket.on('guideStepRedo', ({ stepCanvasData }) => {
-		if (isGuideMode && stepCanvasData) {
-			const img = new Image();
-			img.onload = () => {
-				stepCtx.clearRect(0, 0, stepCanvas.width, stepCanvas.height);
-				stepCtx.drawImage(img, 0, 0);
-				render();
-			};
-			img.src = stepCanvasData;
 		}
 	});
 
@@ -1046,13 +979,11 @@ window.addEventListener('load', async () => {
 			fillPointerId = null;
 			if (!pinchState) {
 				floodFill(data);
-				if (isGuideMode) {
-					// Sync step canvas and add to step history
-					pushStepSnapshot();
-					const stepCanvasData = stepCanvas.toDataURL();
-					socket.emit('guideStepCanvasUpdate', { stepCanvasData });
-				} else {
+				if (!isGuideMode) {
 					socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
+				} else {
+					pushStepSnapshot();
+					socket.emit('saveStepState', { dataUrl: stepCanvas.toDataURL() });
 				}
 			}
 		}
@@ -1067,9 +998,7 @@ window.addEventListener('load', async () => {
 					// In guide mode, keep the drawing on the step canvas and do NOT clear it
 					emitCompletedStroke(/*guide*/true);
 					pushStepSnapshot();
-					// Sync step canvas with other clients
-					const stepCanvasData = stepCanvas.toDataURL();
-					socket.emit('guideStepCanvasUpdate', { stepCanvasData });
+					socket.emit('saveStepState', { dataUrl: composeCurrentStepLayerDataUrl() });
 					// Don't save state in guide mode until moving to next step
 				} else {
 					// Normal mode: composite preview onto base
@@ -1137,9 +1066,7 @@ window.addEventListener('load', async () => {
 			if (stepHistoryIndex > 0) {
 				stepHistoryIndex--;
 				restoreStepSnapshot(stepHistoryIndex);
-				// Emit step canvas update to sync with other clients
-				const stepCanvasData = stepCanvas.toDataURL();
-				socket.emit('guideStepUndo', { stepCanvasData });
+				socket.emit('saveStepState', { dataUrl: composeCurrentStepLayerDataUrl() });
 			}
 			return;
 		}
@@ -1150,9 +1077,7 @@ window.addEventListener('load', async () => {
 			if (stepHistoryIndex < stepHistory.length - 1) {
 				stepHistoryIndex++;
 				restoreStepSnapshot(stepHistoryIndex);
-				// Emit step canvas update to sync with other clients
-				const stepCanvasData = stepCanvas.toDataURL();
-				socket.emit('guideStepRedo', { stepCanvasData });
+				socket.emit('saveStepState', { dataUrl: composeCurrentStepLayerDataUrl() });
 			}
 			return;
 		}
@@ -1161,16 +1086,14 @@ window.addEventListener('load', async () => {
 
 	clearBtn.addEventListener('click', () => {
 		if (isGuideMode) {
-			// In guide mode, only clear the step canvas
+			// Clear only the top step layer (do not affect base)
 			stepCtx.clearRect(0, 0, stepCanvas.width, stepCanvas.height);
+			remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
 			render();
-			// Add to step history and sync with other clients
-			pushStepSnapshot();
-			socket.emit('guideClearStep');
+			initStepHistory();
+			socket.emit('saveStepState', { dataUrl: composeCurrentStepLayerDataUrl() });
 			return;
 		}
-		
-		// Normal mode: clear the main canvas
 		ctx.globalCompositeOperation = 'source-over';
 		ctx.fillStyle = '#ffffff';
 		ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height);
@@ -1250,7 +1173,7 @@ window.addEventListener('load', async () => {
 		}
 	}
 
-	function processSvgForGuide(svgString, svgPath, cachedColorGroups = null) {
+	function processSvgForGuide(svgString, svgPath) {
 		currentSvgPath = svgPath;
 		const parser = new DOMParser();
 		const svgDoc = parser.parseFromString(svgString, 'image/svg+xml');
@@ -1294,13 +1217,7 @@ window.addEventListener('load', async () => {
 		document.body.appendChild(guideHiddenHost);
 
 		loadedSvgDocument = mountedSvgRoot;
-		
-		// Use cached color groups if available, otherwise extract them
-		if (cachedColorGroups && cachedColorGroups.length > 0) {
-			sortedColorGroups = cachedColorGroups;
-		} else {
-			extractAndSortShapes();
-		}
+		extractAndSortShapes();
 		
 		if (sortedColorGroups.length === 0) {
 			guideStatus.textContent = 'No shapes found in SVG';
@@ -1311,10 +1228,8 @@ window.addEventListener('load', async () => {
 
 		// Start guide mode
 		isGuideMode = true;
-		if (currentGuideStep === -1) {
-			currentGuideStep = -1;
-			guideStatus.textContent = `Loaded ${sortedColorGroups.length} color groups. Click Next to start.`;
-		}
+		currentGuideStep = -1;
+		guideStatus.textContent = `Loaded ${sortedColorGroups.length} color groups. Click Next to start.`;
 		updateGuideControls();
 		exitGuideModeBtn.classList.remove('hidden');
 		render();
@@ -1322,17 +1237,6 @@ window.addEventListener('load', async () => {
 
 		// Ensure remote step buffer is cleared at start to maintain correct z-order
 		remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
-		
-		// Emit guide start to sync with other clients (only if we initiated it)
-		if (!cachedColorGroups) {
-			const suggestionLayerData = suggestionCanvas.toDataURL();
-			socket.emit('guideStart', {
-				step: currentGuideStep,
-				svgPath: svgPath,
-				suggestionLayer: suggestionLayerData,
-				sortedColorGroups: sortedColorGroups
-			});
-		}
 	}
 
 	function extractAndSortShapes() {
@@ -1454,18 +1358,8 @@ window.addEventListener('load', async () => {
 			
 			// Clear remote guide buffer for the new step to avoid stale overlays and sync commit
 			remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
-			
-			// Get updated suggestion layer and base data
-			const suggestionLayerData = suggestionCanvas.toDataURL();
-			const baseDataUrl = drawingCanvas.toDataURL();
-			
 			// Emit commit-and-goto so others also commit and switch overlay
-			socket.emit('guideCommitAndGotoStep', { 
-				step: currentGuideStep, 
-				svgPath: currentSvgPath,
-				baseDataUrl: baseDataUrl,
-				suggestionLayer: suggestionLayerData
-			});
+			socket.emit('guideCommitAndGotoStep', { step: currentGuideStep, svgPath: currentSvgPath });
 			initStepHistory();
 		}
 	}
@@ -1483,18 +1377,8 @@ window.addEventListener('load', async () => {
 			
 			// Clear remote guide buffer for the new step to avoid stale overlays
 			remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
-			
-			// Get updated suggestion layer and base data
-			const suggestionLayerData = suggestionCanvas.toDataURL();
-			const baseDataUrl = drawingCanvas.toDataURL();
-			
 			// Emit commit-and-goto backward so others align as well
-			socket.emit('guideCommitAndGotoStep', { 
-				step: currentGuideStep, 
-				svgPath: currentSvgPath,
-				baseDataUrl: baseDataUrl,
-				suggestionLayer: suggestionLayerData
-			});
+			socket.emit('guideCommitAndGotoStep', { step: currentGuideStep, svgPath: currentSvgPath });
 			initStepHistory();
 		}
 	}

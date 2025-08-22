@@ -32,14 +32,11 @@ function getRoomState(roomId) {
       history: [], 
       historyStep: -1, 
       activeUsers: new Map(),
-      // Guide mode state
-      guideMode: {
-        isActive: false,
-        currentStep: -1,
+      guide: {
+        active: false,
         svgPath: null,
-        suggestionLayer: null, // Suggestion canvas state
-        stepCanvasData: null,   // Current step canvas state
-        sortedColorGroups: []   // Cached color groups for quick restoration
+        step: -1,
+        stepDataUrl: null
       }
     });
   }
@@ -61,21 +58,11 @@ io.on('connection', (socket) => {
   socket.join(room);
   console.log(`Socket ${socket.id} joined room ${room}`);
 
-  // Send current canvas state
-  if (state.historyStep >= 0) {
-    socket.emit('loadCanvas', { dataUrl: state.history[state.historyStep] });
-  }
-
-  // Send current guide mode state if active
-  if (state.guideMode.isActive) {
-    socket.emit('restoreGuideMode', {
-      step: state.guideMode.currentStep,
-      svgPath: state.guideMode.svgPath,
-      suggestionLayer: state.guideMode.suggestionLayer,
-      stepCanvasData: state.guideMode.stepCanvasData,
-      sortedColorGroups: state.guideMode.sortedColorGroups
-    });
-  }
+  // Send initial state to the new client
+  socket.emit('initState', {
+    baseDataUrl: state.historyStep >= 0 ? state.history[state.historyStep] : null,
+    guide: state.guide
+  });
 
   socket.on('userSignedUp', ({ signature }) => {
     state.activeUsers.set(socket.id, signature);
@@ -84,6 +71,8 @@ io.on('connection', (socket) => {
 
   socket.on('requestCanvasState', () => {
     if (state.historyStep >= 0) socket.emit('loadCanvas', { dataUrl: state.history[state.historyStep] });
+    // Also sync guide state on demand
+    socket.emit('guideSyncState', state.guide);
   });
 
   // New single-shot stroke event
@@ -121,110 +110,35 @@ io.on('connection', (socket) => {
 
   // Guide mode synchronization
   socket.on('guideStepChange', ({ step, svgPath }) => {
+    state.guide.active = true;
+    if (typeof step === 'number') state.guide.step = step;
+    if (typeof svgPath === 'string') state.guide.svgPath = svgPath;
     socket.to(room).emit('guideStepSync', { step, svgPath });
   });
 
-  // Start guide mode with initial state
-  socket.on('guideStart', ({ step, svgPath, suggestionLayer, sortedColorGroups }) => {
-    state.guideMode.isActive = true;
-    state.guideMode.currentStep = step;
-    state.guideMode.svgPath = svgPath;
-    state.guideMode.suggestionLayer = suggestionLayer;
-    state.guideMode.stepCanvasData = null; // Clear step canvas on start
-    state.guideMode.sortedColorGroups = sortedColorGroups;
-    
-    socket.to(room).emit('guideStart', { 
-      step, 
-      svgPath, 
-      suggestionLayer,
-      sortedColorGroups 
-    });
-  });
-
-  // Update suggestion layer (when step changes)
-  socket.on('guideSuggestionUpdate', ({ suggestionLayer }) => {
-    if (state.guideMode.isActive) {
-      state.guideMode.suggestionLayer = suggestionLayer;
-      socket.to(room).emit('guideSuggestionUpdate', { suggestionLayer });
-    }
-  });
-
-  // Update step canvas data
-  socket.on('guideStepCanvasUpdate', ({ stepCanvasData }) => {
-    if (state.guideMode.isActive) {
-      state.guideMode.stepCanvasData = stepCanvasData;
-      socket.to(room).emit('guideStepCanvasUpdate', { stepCanvasData });
-    }
-  });
-
   // Commit current step to base across all clients and go to next step
-  socket.on('guideCommitAndGotoStep', ({ step, svgPath, baseDataUrl, suggestionLayer }) => {
-    if (state.guideMode.isActive) {
-      state.guideMode.currentStep = step;
-      state.guideMode.suggestionLayer = suggestionLayer;
-      state.guideMode.stepCanvasData = null; // Clear step canvas
-      
-      // Update main canvas history if baseDataUrl provided
-      if (baseDataUrl) {
-        if (state.historyStep < state.history.length - 1) {
-          state.history = state.history.slice(0, state.historyStep + 1);
-        }
-        state.history.push(baseDataUrl);
-        state.historyStep++;
-      }
-    }
-    
-    socket.to(room).emit('guideCommitAndGotoStep', { 
-      step, 
-      svgPath, 
-      baseDataUrl,
-      suggestionLayer 
-    });
+  socket.on('guideCommitAndGotoStep', ({ step, svgPath, baseDataUrl }) => {
+    state.guide.active = true;
+    state.guide.step = typeof step === 'number' ? step : state.guide.step;
+    state.guide.svgPath = typeof svgPath === 'string' ? svgPath : state.guide.svgPath;
+    // Reset current step layer for the new step
+    state.guide.stepDataUrl = null;
+    socket.to(room).emit('guideCommitAndGotoStep', { step, svgPath, baseDataUrl });
   });
 
   // Exit guide mode across clients
   socket.on('guideExit', ({ baseDataUrl }) => {
-    // Reset guide mode state
-    state.guideMode.isActive = false;
-    state.guideMode.currentStep = -1;
-    state.guideMode.svgPath = null;
-    state.guideMode.suggestionLayer = null;
-    state.guideMode.stepCanvasData = null;
-    state.guideMode.sortedColorGroups = [];
-
-    // Update main canvas history if baseDataUrl provided
-    if (baseDataUrl) {
-      if (state.historyStep < state.history.length - 1) {
-        state.history = state.history.slice(0, state.historyStep + 1);
-      }
-      state.history.push(baseDataUrl);
-      state.historyStep++;
-    }
-    
+    state.guide = { active: false, svgPath: null, step: -1, stepDataUrl: null };
     socket.to(room).emit('guideExit', { baseDataUrl });
   });
 
-  // Clear guide step canvas
-  socket.on('guideClearStep', () => {
-    if (state.guideMode.isActive) {
-      state.guideMode.stepCanvasData = null;
-      socket.to(room).emit('guideClearStep');
-    }
-  });
-
-  // Guide step undo/redo
-  socket.on('guideStepUndo', ({ stepCanvasData }) => {
-    if (state.guideMode.isActive) {
-      state.guideMode.stepCanvasData = stepCanvasData;
-      socket.to(room).emit('guideStepUndo', { stepCanvasData });
-    }
-  });
-
-  socket.on('guideStepRedo', ({ stepCanvasData }) => {
-    if (state.guideMode.isActive) {
-      state.guideMode.stepCanvasData = stepCanvasData;
-      socket.to(room).emit('guideStepRedo', { stepCanvasData });
-    }
+  // Persist and broadcast the current guide step layer (top layer) as a data URL
+  socket.on('saveStepState', ({ dataUrl }) => {
+    if (!state.guide.active) return;
+    try {
+      state.guide.stepDataUrl = dataUrl || null;
+      io.to(room).emit('loadStepState', { dataUrl: state.guide.stepDataUrl });
+    } catch (_) {}
   });
 
   socket.on('disconnect', () => {
