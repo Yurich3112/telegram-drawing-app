@@ -19,8 +19,6 @@ app.get('/', (req, res) => {
 
 // Static assets (scripts, css, icons)
 app.use(express.static(path.join(__dirname, '..', 'client')));
-// Serve images directory for guides
-app.use('/images', express.static(path.join(__dirname, '..', 'images')));
 
 // In-memory per-room state
 const rooms = new Map();
@@ -30,10 +28,7 @@ function getRoomState(roomId) {
     rooms.set(roomId, { 
       history: [], 
       historyStep: -1, 
-      activeUsers: new Map(),
-      // Guide state
-      guideUrl: null,
-      guideStep: 0
+      activeUsers: new Map()
     });
   }
   return rooms.get(roomId);
@@ -57,10 +52,6 @@ io.on('connection', (socket) => {
   if (state.historyStep >= 0) {
     socket.emit('loadCanvas', { dataUrl: state.history[state.historyStep] });
   }
-  // If a guide is active for this room, inform the newly connected client
-  if (state.guideUrl) {
-    socket.emit('guideStarted', { url: state.guideUrl });
-  }
 
   socket.on('userSignedUp', ({ signature }) => {
     state.activeUsers.set(socket.id, signature);
@@ -82,20 +73,6 @@ io.on('connection', (socket) => {
 
   socket.on('clearCanvas', () => {
     socket.to(room).emit('clearCanvas');
-  });
-
-  // Guide events
-  socket.on('startGuide', ({ url }) => {
-    state.guideUrl = url;
-    state.guideStep = 0;
-    io.to(room).emit('guideStarted', { url });
-  });
-
-  socket.on('guideStepCompleted', ({ imageDataUrl }) => {
-    io.to(room).emit('applyGuideStep', { imageDataUrl });
-    if (state.guideUrl) {
-      state.guideStep++;
-    }
   });
 
   socket.on('saveState', ({ dataUrl }) => {

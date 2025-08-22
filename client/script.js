@@ -59,17 +59,6 @@ window.addEventListener('load', async () => {
 	previewCanvas.height = 2048;
 	const previewCtx = previewCanvas.getContext('2d');
 
-	// --- Offscreen buffers for guide mode ---
-	const suggestionBuffer = document.createElement('canvas');
-	suggestionBuffer.width = 2048;
-	suggestionBuffer.height = 2048;
-	const suggestionBufferCtx = suggestionBuffer.getContext('2d');
-
-	const guideDrawingBuffer = document.createElement('canvas');
-	guideDrawingBuffer.width = 2048;
-	guideDrawingBuffer.height = 2048;
-	const guideDrawingBufferCtx = guideDrawingBuffer.getContext('2d');
-
 	// --- Bottom bar elements ---
 	const expansionPanel = document.getElementById('expansion-panel');
 	const panelTools = document.getElementById('panel-tools');
@@ -92,34 +81,6 @@ window.addEventListener('load', async () => {
 	const eraserBtn = document.getElementById('eraserBtn');
 	const fillBtn = document.getElementById('fillBtn');
 	const paletteContainer = document.getElementById('color-palette');
-
-	// --- Guide UI elements ---
-	const suggestionCanvas = document.getElementById('suggestion-canvas');
-	const suggestionCtx = suggestionCanvas ? suggestionCanvas.getContext('2d') : null;
-	const guideDrawingCanvas = document.getElementById('guide-drawing-canvas');
-	const guideDrawingCtx = guideDrawingCanvas ? guideDrawingCanvas.getContext('2d') : null;
-	const guideModeToggle = document.getElementById('guide-mode-toggle');
-	const guideControls = document.getElementById('guide-controls');
-	const guidePrevBtn = document.getElementById('guide-prev-btn');
-	const guideNextBtn = document.getElementById('guide-next-btn');
-	const guideSelectBtn = document.getElementById('guide-select-btn');
-	const guideSelectionModal = document.getElementById('guide-selection-modal');
-	const guideImageList = document.getElementById('guide-image-list');
-	const guideModalCloseBtn = document.getElementById('guide-modal-close-btn');
-
-	let isGuideModeActive = false;
-	let guideData = null; // { steps: [...], originalSvg: Element }
-	let currentGuideStep = 0;
-
-	// Ensure guide canvases match drawing surface resolution
-	if (suggestionCanvas) { suggestionCanvas.width = drawingCanvas.width; suggestionCanvas.height = drawingCanvas.height; }
-	if (guideDrawingCanvas) { guideDrawingCanvas.width = drawingCanvas.width; guideDrawingCanvas.height = drawingCanvas.height; }
-
-	const availableGuides = [
-		{ name: 'Two Chickens', url: 'https://raw.githubusercontent.com/Yurich3112/telegram-drawing-app/c1500591f0a0b111dfc68dbb60262fbc10aa9c4d/images/SVG/hand-drawn-image-of-two-yellow-baby-chicken-being-%20(1).svg' },
-		{ name: 'Two Turtles', url: 'https://raw.githubusercontent.com/Yurich3112/telegram-drawing-app/c1500591f0a0b111dfc68dbb60262fbc10aa9c4d/images/SVG/two-cute-turtles-swimming-in-the-sea-.svg' },
-		{ name: 'Two Dolphins', url: 'https://raw.githubusercontent.com/Yurich3112/telegram-drawing-app/c1500591f0a0b111dfc68dbb60262fbc10aa9c4d/images/SVG/two-happy-dolphins-.svg' }
-	];
 
 	// --- Signature Pad Logic ---
 	let isSigDrawing = false;
@@ -279,18 +240,6 @@ window.addEventListener('load', async () => {
 		MIN_SCALE = Math.min(fitScale * 0.98, 0.02);
 		render();
 		socket.emit('requestCanvasState');
-		// Resize guide overlay canvases to match display canvas dimensions
-		if (suggestionCanvas && guideDrawingCanvas) {
-			suggestionCanvas.width = displayCanvas.width;
-			suggestionCanvas.height = displayCanvas.height;
-			suggestionCanvas.style.width = displayCanvas.style.width;
-			suggestionCanvas.style.height = displayCanvas.style.height;
-			guideDrawingCanvas.width = displayCanvas.width;
-			guideDrawingCanvas.height = displayCanvas.height;
-			guideDrawingCanvas.style.width = displayCanvas.style.width;
-			guideDrawingCanvas.style.height = displayCanvas.style.height;
-		}
-		if (isGuideModeActive) renderSuggestionLayer();
 	}
 
 	function render() {
@@ -306,9 +255,6 @@ window.addEventListener('load', async () => {
 		displayCtx.drawImage(drawingCanvas, 0, 0);
 		// Draw preview layer over base
 		displayCtx.drawImage(previewCanvas, 0, 0);
-		// Draw guide suggestion and guide drawing layers if available
-		if (suggestionCanvas) displayCtx.drawImage(suggestionCanvas, 0, 0, drawingCanvas.width, drawingCanvas.height);
-		if (guideDrawingCanvas) displayCtx.drawImage(guideDrawingCanvas, 0, 0, drawingCanvas.width, drawingCanvas.height);
 		// Outline the drawing area for clear boundaries
 		displayCtx.save();
 		displayCtx.strokeStyle = 'rgba(0,0,0,0.6)';
@@ -364,157 +310,6 @@ window.addEventListener('load', async () => {
 		socket.emit('stroke', stroke);
 	}
 
-	// --- Guide helpers ---
-	function updateGuideControls() {
-		if (!guideControls || !guidePrevBtn || !guideNextBtn) return;
-		if (!guideData) { guidePrevBtn.disabled = true; guideNextBtn.disabled = true; return; }
-		guidePrevBtn.disabled = currentGuideStep <= 0;
-		guideNextBtn.disabled = currentGuideStep >= (guideData.steps.length - 1);
-	}
-
-	async function loadAndProcessGuide(url) {
-		try {
-			const response = await fetch(url);
-			if (!response.ok) throw new Error('Failed to fetch guide');
-			const svgString = await response.text();
-			const parser = new DOMParser();
-			const svgDoc = parser.parseFromString(svgString, 'image/svg+xml');
-			const svgElement = svgDoc.documentElement;
-			const steps = extractAndSortShapes(svgElement);
-			guideData = { steps, originalSvg: svgElement };
-			isGuideModeActive = true;
-			currentGuideStep = 0;
-			if (guideDrawingCanvas) guideDrawingCanvas.style.pointerEvents = 'auto';
-			renderSuggestionLayer();
-			updateGuideControls();
-		} catch (err) {
-			console.error('Guide load failed', err);
-			isGuideModeActive = false;
-		}
-	}
-
-	function renderSuggestionLayer() {
-		if (!suggestionCtx || !guideData) return;
-		suggestionCtx.clearRect(0, 0, suggestionCanvas.width, suggestionCanvas.height);
-		const step = guideData.steps[currentGuideStep];
-		if (!step) return;
-		suggestionCtx.save();
-		suggestionCtx.globalAlpha = 0.5;
-		step.shapes.forEach(shapeData => {
-			const svgNode = shapeData.element.cloneNode(true);
-			svgNode.removeAttribute('class');
-			const serializer = new XMLSerializer();
-			const svgString = serializer.serializeToString(svgNode);
-			const viewBox = guideData.originalSvg.getAttribute('viewBox') || `0 0 ${drawingCanvas.width} ${drawingCanvas.height}`;
-			const fullSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}">${svgString}</svg>`;
-			const img = new Image();
-			img.onload = () => {
-				suggestionCtx.drawImage(img, 0, 0, suggestionCanvas.width, suggestionCanvas.height);
-				render();
-			};
-			img.src = 'data:image/svg+xml;base64,' + btoa(fullSvg);
-		});
-		suggestionCtx.restore();
-		// Suggest color for current step
-		if (step.color) {
-			colorPicker.value = step.color;
-			currentColor = step.color;
-			colorSwatch.style.backgroundColor = currentColor;
-		}
-	}
-
-	// --- SVG parsing and grouping helpers ---
-	function getEffectiveColor(element) {
-		let color = element.getAttribute('fill');
-		if (color && color !== 'none') return color;
-		color = element.getAttribute('stroke');
-		if (color && color !== 'none') return color;
-		try {
-			const computedStyle = window.getComputedStyle(element);
-			color = computedStyle.getPropertyValue('fill');
-			if (color && color !== 'none' && color !== 'rgba(0, 0, 0, 0)') return color;
-			color = computedStyle.getPropertyValue('stroke');
-			if (color && color !== 'none' && color !== 'rgba(0, 0, 0, 0)') return color;
-		} catch (_) {}
-		return null;
-	}
-
-	function calculatePolygonArea(pointsString) {
-		const points = pointsString.trim().split(/\s+|,/).filter(n => n !== '').map(Number);
-		let area = 0;
-		for (let i = 0; i < points.length; i += 2) {
-			const x1 = points[i];
-			const y1 = points[i + 1];
-			const x2 = points[(i + 2) % points.length];
-			const y2 = points[(i + 3) % points.length];
-			area += (x1 * y2) - (y1 * x2);
-		}
-		return Math.abs(area / 2);
-	}
-
-	function calculateShapeArea(element) {
-		let area = 0;
-		try {
-			switch (element.tagName.toLowerCase()) {
-				case 'rect': {
-					const width = parseFloat(element.getAttribute('width'));
-					const height = parseFloat(element.getAttribute('height'));
-					if (!isNaN(width) && !isNaN(height)) area = width * height;
-					break;
-				}
-				case 'circle': {
-					const r = parseFloat(element.getAttribute('r'));
-					if (!isNaN(r)) area = Math.PI * r * r;
-					break;
-				}
-				case 'ellipse': {
-					const rx = parseFloat(element.getAttribute('rx'));
-					const ry = parseFloat(element.getAttribute('ry'));
-					if (!isNaN(rx) && !isNaN(ry)) area = Math.PI * rx * ry;
-					break;
-				}
-				case 'polygon': {
-					const pointsString = element.getAttribute('points');
-					if (pointsString) area = calculatePolygonArea(pointsString);
-					break;
-				}
-				case 'path': {
-					const bbox = element.getBBox();
-					area = bbox.width * bbox.height;
-					break;
-				}
-				default: {
-					area = 0;
-				}
-			}
-		} catch (e) {
-			try { const bbox = element.getBBox(); area = bbox.width * bbox.height; } catch(_) { area = 0; }
-		}
-		return area;
-	}
-
-	function extractAndSortShapes(svgDocument) {
-		const rawShapes = svgDocument.querySelectorAll('rect, circle, ellipse, polygon, path');
-		const groupedShapes = {};
-		rawShapes.forEach(shape => {
-			let color = getEffectiveColor(shape);
-			if (!color || color === 'none') return;
-			color = color.toLowerCase().trim();
-			const area = calculateShapeArea(shape);
-			if (area <= 0) return;
-			if (!groupedShapes[color]) groupedShapes[color] = [];
-			groupedShapes[color].push({ element: shape, area });
-		});
-		const sortedColorGroups = [];
-		for (const color in groupedShapes) {
-			const shapesInGroup = groupedShapes[color];
-			const totalArea = shapesInGroup.reduce((sum, s) => sum + s.area, 0);
-			sortedColorGroups.push({ color, totalArea, shapes: shapesInGroup });
-		}
-		sortedColorGroups.sort((a, b) => b.totalArea - a.totalArea);
-		return sortedColorGroups;
-	}
-
 	function canvasPointFromClient(clientX, clientY) {
 		const rect = displayCanvas.getBoundingClientRect();
 		const xCss = clientX - rect.left;
@@ -550,7 +345,7 @@ window.addEventListener('load', async () => {
 		render();
 	}
 
-	function handleStopDrawing() { ctx.beginPath(); if (guideDrawingCtx) guideDrawingCtx.beginPath(); if (previewCtx) previewCtx.beginPath(); }
+	function handleStopDrawing() { ctx.beginPath(); }
 
 	function switchTool(tool) {
 		currentTool = tool;
@@ -713,13 +508,6 @@ window.addEventListener('load', async () => {
 	socket.on('applyStroke', (stroke) => { applyStrokeFromServer(stroke); });
 	socket.on('fill', (data) => { floodFill(data); });
 	socket.on('clearCanvas', () => { ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height); previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height); render(); });
-	// Guide sync
-	socket.on('guideStarted', ({ url }) => { loadAndProcessGuide(url); });
-	socket.on('applyGuideStep', ({ imageDataUrl }) => {
-		const img = new Image();
-		img.onload = () => { ctx.drawImage(img, 0, 0, drawingCanvas.width, drawingCanvas.height); render(); socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() }); };
-		img.src = imageDataUrl;
-	});
 
 	// No locking in the new model
 
@@ -878,22 +666,6 @@ window.addEventListener('load', async () => {
 			}
 			if (strokeStarted) {
 				const data = { x, y };
-				if (isGuideModeActive && guideDrawingCtx) {
-					// Mirror drawing to guide drawing layer for user feedback
-					guideDrawingCtx.save();
-					guideDrawingCtx.globalCompositeOperation = 'source-over';
-					guideDrawingCtx.lineCap = 'round';
-					guideDrawingCtx.lineJoin = 'round';
-					guideDrawingCtx.lineWidth = currentStrokeMeta.size;
-					guideDrawingCtx.strokeStyle = currentStrokeMeta.tool === 'eraser' ? '#ffffff' : currentStrokeMeta.color;
-					const midX = (lastX + data.x) / 2;
-					const midY = (lastY + data.y) / 2;
-					guideDrawingCtx.beginPath();
-					guideDrawingCtx.moveTo(lastX, lastY);
-					guideDrawingCtx.quadraticCurveTo(lastX, lastY, midX, midY);
-					guideDrawingCtx.stroke();
-					guideDrawingCtx.restore();
-				}
 				handleDraw(data);
 				currentStrokePoints.push({ x, y });
 			}
@@ -987,62 +759,10 @@ window.addEventListener('load', async () => {
 		ctx.fillStyle = '#ffffff';
 		ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height);
 		previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
-		if (suggestionCtx) suggestionCtx.clearRect(0, 0, suggestionCanvas.width, suggestionCanvas.height);
-		if (guideDrawingCtx) guideDrawingCtx.clearRect(0, 0, guideDrawingCanvas.width, guideDrawingCanvas.height);
 		render();
 		socket.emit('clearCanvas');
 		socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
 	});
-
-	// --- Guide UI wiring ---
-	if (guideModeToggle && guideControls) {
-		guideModeToggle.addEventListener('click', () => guideControls.classList.toggle('hidden'));
-	}
-	if (guideSelectBtn && guideSelectionModal) {
-		guideSelectBtn.addEventListener('click', () => guideSelectionModal.classList.remove('hidden'));
-	}
-	if (guideModalCloseBtn && guideSelectionModal) {
-		guideModalCloseBtn.addEventListener('click', () => guideSelectionModal.classList.add('hidden'));
-	}
-	if (guideImageList) {
-		availableGuides.forEach(guide => {
-			const li = document.createElement('li');
-			li.textContent = guide.name;
-			li.dataset.url = guide.url;
-			li.addEventListener('click', () => {
-				guideSelectionModal.classList.add('hidden');
-				socket.emit('startGuide', { url: guide.url });
-			});
-			guideImageList.appendChild(li);
-		});
-	}
-	if (guideNextBtn) {
-		guideNextBtn.addEventListener('click', () => {
-			if (!isGuideModeActive || !guideData) return;
-			const drawnDataUrl = guideDrawingCanvas.toDataURL();
-			socket.emit('guideStepCompleted', { imageDataUrl: drawnDataUrl });
-			guideDrawingCtx.clearRect(0, 0, guideDrawingCanvas.width, guideDrawingCanvas.height);
-			if (currentGuideStep < guideData.steps.length - 1) {
-				currentGuideStep++;
-				renderSuggestionLayer();
-				updateGuideControls();
-			} else {
-				isGuideModeActive = false;
-				guideDrawingCanvas.style.pointerEvents = 'none';
-				suggestionCtx.clearRect(0, 0, suggestionCanvas.width, suggestionCanvas.height);
-			}
-		});
-	}
-	if (guidePrevBtn) {
-		guidePrevBtn.addEventListener('click', () => {
-			if (!isGuideModeActive || !guideData) return;
-			if (currentGuideStep > 0) {
-				currentGuideStep--;
-				renderSuggestionLayer();
-				updateGuideControls();
-			}
-		});
-	}
 
 	// Initial
 	resizeCanvas();
