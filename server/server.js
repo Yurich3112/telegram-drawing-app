@@ -2,7 +2,6 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
-const fs = require('fs');
 require('dotenv').config();
 
 const app = express();
@@ -20,23 +19,9 @@ app.get('/', (req, res) => {
 
 // Static assets (scripts, css, icons)
 app.use(express.static(path.join(__dirname, '..', 'client')));
-// Serve images (SVGs and others)
-app.use('/images', express.static(path.join(__dirname, '..', 'images')));
 
-// API to list available SVGs for the guide
-app.get('/api/svgs', (req, res) => {
-  try {
-    const svgDir = path.join(__dirname, '..', 'images', 'SVG');
-    if (!fs.existsSync(svgDir)) return res.json([]);
-    const files = fs.readdirSync(svgDir)
-      .filter(f => f.toLowerCase().endsWith('.svg'))
-      .map(f => ({ name: f, url: `/images/SVG/${encodeURIComponent(f)}` }));
-    res.json(files);
-  } catch (e) {
-    console.error('Error listing SVGs:', e);
-    res.status(500).json({ error: 'failed' });
-  }
-});
+// Serve images
+app.use('/images', express.static(path.join(__dirname, '..', 'images')));
 
 // In-memory per-room state
 const rooms = new Map();
@@ -46,12 +31,7 @@ function getRoomState(roomId) {
     rooms.set(roomId, { 
       history: [], 
       historyStep: -1, 
-      activeUsers: new Map(),
-      guide: {
-        active: false,
-        svgPath: null,
-        stepIndex: -1
-      }
+      activeUsers: new Map()
     });
   }
   return rooms.get(roomId);
@@ -74,11 +54,6 @@ io.on('connection', (socket) => {
 
   if (state.historyStep >= 0) {
     socket.emit('loadCanvas', { dataUrl: state.history[state.historyStep] });
-  }
-
-  // Send current guide state to the new client if active
-  if (state.guide && state.guide.active && state.guide.svgPath) {
-    socket.emit('guideSet', { svgPath: state.guide.svgPath, stepIndex: state.guide.stepIndex });
   }
 
   socket.on('userSignedUp', ({ signature }) => {
@@ -109,42 +84,6 @@ io.on('connection', (socket) => {
     state.historyStep++;
   });
 
-  // Guide synchronization events
-  socket.on('guideSet', ({ svgPath, stepIndex }) => {
-    state.guide.active = true;
-    state.guide.svgPath = svgPath;
-    state.guide.stepIndex = typeof stepIndex === 'number' ? stepIndex : 0;
-    io.to(room).emit('guideSet', { svgPath: state.guide.svgPath, stepIndex: state.guide.stepIndex });
-  });
-
-  socket.on('guideStep', ({ stepIndex }) => {
-    if (typeof stepIndex === 'number') {
-      state.guide.stepIndex = stepIndex;
-      io.to(room).emit('guideStep', { stepIndex });
-    }
-  });
-
-  socket.on('guideEnd', () => {
-    state.guide.active = false;
-    state.guide.svgPath = null;
-    state.guide.stepIndex = -1;
-    io.to(room).emit('guideEnd');
-  });
-
-  socket.on('stepStroke', (stroke) => {
-    // Mirror of normal stroke, but applied to step layer client-side
-    socket.to(room).emit('applyStepStroke', stroke);
-  });
-
-  socket.on('stepFill', (data) => {
-    socket.to(room).emit('stepFill', data);
-  });
-
-  socket.on('commitStep', () => {
-    // Ask clients to merge step layer into base and clear step layer
-    io.to(room).emit('commitStep');
-  });
-
   socket.on('undo', () => {
     if (state.historyStep > 0) {
       state.historyStep--;
@@ -157,6 +96,11 @@ io.on('connection', (socket) => {
       state.historyStep++;
       io.to(room).emit('loadCanvas', { dataUrl: state.history[state.historyStep] });
     }
+  });
+
+  // Guide mode synchronization
+  socket.on('guideStepChange', ({ step, svgPath }) => {
+    socket.to(room).emit('guideStepSync', { step, svgPath });
   });
 
   socket.on('disconnect', () => {

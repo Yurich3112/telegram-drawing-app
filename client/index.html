@@ -22,18 +22,33 @@
             <!-- Canvas viewport -->
             <div id="canvas-container">
                 <canvas id="drawing-canvas"></canvas>
-                <!-- Guide UI -->
-                <div id="guide-ui">
-                    <button id="guideToggleBtn" class="guide-btn" title="Step-by-step guide"><i class="fa-solid fa-image"></i></button>
-                    <div id="guidePanel" class="hidden">
-                        <div class="guide-controls">
-                            <button id="guidePrevBtn" class="guide-ctrl" title="Previous step"><i class="fa-solid fa-chevron-left"></i></button>
-                            <button id="guidePickBtn" class="guide-ctrl" title="Choose image"><i class="fa-solid fa-image"></i></button>
-                            <button id="guideNextBtn" class="guide-ctrl" title="Next step"><i class="fa-solid fa-chevron-right"></i></button>
-                        </div>
-                        <div id="guideStatus" class="guide-status"></div>
-                        <div id="guideImageList" class="guide-list hidden"></div>
-                    </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Guide mode button -->
+    <button id="guide-mode-btn" class="guide-button" title="Step-by-step Guide">
+        <i class="fa-solid fa-image"></i>
+    </button>
+
+    <!-- Guide mode modal -->
+    <div id="guide-modal" class="guide-modal hidden">
+        <div class="guide-modal-content">
+            <span class="close-guide-modal">&times;</span>
+            <h3>Step-by-Step Guide</h3>
+            <div class="guide-controls">
+                <button id="guide-prev" class="guide-nav" disabled><i class="fa-solid fa-chevron-left"></i></button>
+                <button id="guide-select-image" class="guide-nav"><i class="fa-solid fa-image"></i></button>
+                <button id="guide-next" class="guide-nav" disabled><i class="fa-solid fa-chevron-right"></i></button>
+            </div>
+            <div id="guide-status" class="guide-status">Select an image to start</div>
+            <button id="exit-guide-mode" class="exit-guide-btn hidden">Exit Guide Mode</button>
+            
+            <!-- Image selection panel -->
+            <div id="image-selection" class="image-selection hidden">
+                <h4>Select a Template</h4>
+                <div id="image-list" class="image-list">
+                    <!-- Images will be populated here -->
                 </div>
             </div>
         </div>
