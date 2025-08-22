@@ -139,7 +139,7 @@ bot.on('inline_query', (query) => {
                 disable_web_page_preview: false
             },
             
-            thumbnail_url: 'https://i.imgur.com/TZeA09j.png'
+            thumbnail_url: 'https://raw.githubusercontent.com/Yurich3112/telegram-drawing-app/refs/heads/main/images/a-color-palet-with-paint-brushes%20(1).png'
         }
     ];
 
