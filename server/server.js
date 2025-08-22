@@ -104,13 +104,13 @@ io.on('connection', (socket) => {
   });
 
   // Commit current step to base across all clients and go to next step
-  socket.on('guideCommitAndGotoStep', ({ step, svgPath }) => {
-    socket.to(room).emit('guideCommitAndGotoStep', { step, svgPath });
+  socket.on('guideCommitAndGotoStep', ({ step, svgPath, baseDataUrl }) => {
+    socket.to(room).emit('guideCommitAndGotoStep', { step, svgPath, baseDataUrl });
   });
 
   // Exit guide mode across clients
-  socket.on('guideExit', () => {
-    socket.to(room).emit('guideExit');
+  socket.on('guideExit', ({ baseDataUrl }) => {
+    socket.to(room).emit('guideExit', { baseDataUrl });
   });
 
   socket.on('disconnect', () => {

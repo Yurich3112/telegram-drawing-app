@@ -642,11 +642,19 @@ window.addEventListener('load', async () => {
 	});
 
 	// Guide synchronization
-	socket.on('guideCommitAndGotoStep', async ({ step, svgPath }) => {
+	socket.on('guideCommitAndGotoStep', async ({ step, svgPath, baseDataUrl }) => {
 		// Commit any remote step drawings into our base if we have our own step visible
 		if (isGuideMode) {
 			ctx.drawImage(stepCanvas, 0, 0);
 			stepCtx.clearRect(0, 0, stepCanvas.width, stepCanvas.height);
+		}
+		// Merge sender base snapshot if provided (ensures everyone aligns)
+		if (baseDataUrl) {
+			try {
+				const img = new Image();
+				img.onload = () => { ctx.drawImage(img, 0, 0); render(); };
+				img.src = baseDataUrl;
+			} catch (_) {}
 		}
 		// Clear remote step buffer when switching steps
 		remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
@@ -664,10 +672,18 @@ window.addEventListener('load', async () => {
 		initStepHistory();
 	});
 
-	socket.on('guideExit', () => {
+	socket.on('guideExit', ({ baseDataUrl }) => {
 		// Clear suggestion and remote step overlay
 		suggestionCtx.clearRect(0, 0, suggestionCanvas.width, suggestionCanvas.height);
 		remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
+		// Merge base snapshot if provided
+		if (baseDataUrl) {
+			try {
+				const img = new Image();
+				img.onload = () => { ctx.drawImage(img, 0, 0); render(); };
+				img.src = baseDataUrl;
+			} catch (_) {}
+		}
 		// Reset local guide state if active
 		isGuideMode = false;
 		currentGuideStep = -1;
@@ -1237,8 +1253,9 @@ window.addEventListener('load', async () => {
 			
 			// Clear remote guide buffer for the new step to avoid stale overlays and sync commit
 			remoteStepCtx.clearRect(0, 0, remoteStepCanvas.width, remoteStepCanvas.height);
-			// Emit commit-and-goto so others also commit their current step to base and switch overlay
-			socket.emit('guideCommitAndGotoStep', { step: currentGuideStep, svgPath: currentSvgPath });
+			// Emit commit-and-goto with base snapshot so others move current drawings to base
+			const baseDataUrl = drawingCanvas.toDataURL();
+			socket.emit('guideCommitAndGotoStep', { step: currentGuideStep, svgPath: currentSvgPath, baseDataUrl });
 			initStepHistory();
 		}
 	}
@@ -1430,8 +1447,9 @@ window.addEventListener('load', async () => {
 			socket.emit('saveState', { dataUrl: drawingCanvas.toDataURL() });
 			
 			render();
-			// Notify others to exit and clear suggestion overlays
-			socket.emit('guideExit');
+			// Notify others to exit and clear suggestion overlays with a base snapshot
+			const baseDataUrl = drawingCanvas.toDataURL();
+			socket.emit('guideExit', { baseDataUrl });
 		}
 	}
 
