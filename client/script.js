@@ -2,26 +2,38 @@ window.addEventListener('load', async () => {
 	// Tell the Telegram client that the app is ready.
 	window.Telegram.WebApp.ready();
 
-	// Ensure fullscreen and prevent swipe-to-minimize in Telegram mobile clients
-	const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
-	if (tg) {
-		try { tg.expand(); } catch {}
-		if (typeof tg.disableVerticalSwipes === 'function') {
-			try { tg.disableVerticalSwipes(); } catch {}
-		}
-		// If Telegram collapses the webview later, try to re-expand
-		tg.onEvent && tg.onEvent('viewportChanged', () => {
-			if (!tg.isExpanded) {
-				try { tg.expand(); } catch {}
+	// Request fullscreen and disable swipe-to-minimize in Telegram Mini Apps (mobile)
+	try {
+		const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+		if (tg) {
+			if (typeof tg.disableVerticalSwipes === 'function') {
+				tg.disableVerticalSwipes();
 			}
-		});
-	}
+			if (typeof tg.requestFullscreen === 'function') {
+				tg.requestFullscreen();
+			} else if (typeof tg.expand === 'function') {
+				// Fallback for older clients: expand to the maximum available height
+				tg.expand();
+			}
+			if (typeof tg.onEvent === 'function') {
+				// Re-assert fullscreen/expanded state on viewport changes
+				tg.onEvent('viewportChanged', () => {
+					if (typeof tg.requestFullscreen === 'function') {
+						tg.requestFullscreen();
+					} else if (typeof tg.expand === 'function') {
+						tg.expand();
+					}
+				});
+			}
+		}
+	} catch {}
 
 	// Parse room from URL or derive via Telegram WebApp initData (no token)
 	const params = new URLSearchParams(window.location.search);
 	let room = params.get('room');
 
 	if (!room) {
+		const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
 		const initDataUnsafe = tg ? tg.initDataUnsafe : {};
 		const startParam = (initDataUnsafe && initDataUnsafe.start_param) ? initDataUnsafe.start_param : null;
 		if (startParam && startParam.startsWith('r_')) {
