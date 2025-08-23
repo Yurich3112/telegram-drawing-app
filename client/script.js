@@ -116,12 +116,15 @@ window.addEventListener('load', async () => {
 	const panelSize = document.getElementById('panel-size');
 	const panelColor = document.getElementById('panel-color');
 	const panelHistory = document.getElementById('panel-history');
+	const panelGuide = document.getElementById('panel-guide');
 	const toolToggleBtn = document.getElementById('toolToggleBtn');
 	const sizeToggleBtn = document.getElementById('sizeToggleBtn');
 	const colorToggleBtn = document.getElementById('colorToggleBtn');
 	const historyToggleBtn = document.getElementById('historyToggleBtn');
+	const guideToggleBtn = document.getElementById('guideToggleBtn');
 	const sizeDot = document.getElementById('sizeDot');
 	const colorSwatch = document.getElementById('colorSwatch');
+	const inlineImageList = document.getElementById('inline-image-list');
 
 	const colorPicker = document.getElementById('colorPicker');
 	const brushSize = document.getElementById('brushSize');
@@ -864,11 +867,12 @@ window.addEventListener('load', async () => {
 
 	// UI: toggle logic for bottom bar
 	function showPanel(which) {
-		[panelTools, panelSize, panelColor, panelHistory].forEach(p => p.classList.add('hidden'));
+		[panelTools, panelSize, panelColor, panelHistory, panelGuide].forEach(p => p.classList.add('hidden'));
 		if (which === 'tools') panelTools.classList.remove('hidden');
 		if (which === 'size') panelSize.classList.remove('hidden');
 		if (which === 'color') panelColor.classList.remove('hidden');
 		if (which === 'history') panelHistory.classList.remove('hidden');
+		if (which === 'guide') panelGuide.classList.remove('hidden');
 		expansionPanel.classList.remove('hidden');
 	}
 	function hidePanels() { expansionPanel.classList.add('hidden'); }
@@ -887,6 +891,7 @@ window.addEventListener('load', async () => {
 	sizeToggleBtn.addEventListener('click', () => togglePanel('size'));
 	colorToggleBtn.addEventListener('click', () => togglePanel('color'));
 	historyToggleBtn.addEventListener('click', () => togglePanel('history'));
+	guideToggleBtn.addEventListener('click', () => togglePanel('guide'));
 
 	function shouldPanOnPointerDown(e) {
 		const isMiddleButton = e.button === 1 || (e.pointerType === 'mouse' && (e.buttons & 4) !== 0);
@@ -1135,7 +1140,6 @@ window.addEventListener('load', async () => {
 	});
 
 	// Guide mode event listeners
-	const guideModeBtn = document.getElementById('guide-mode-btn');
 	const guideModal = document.getElementById('guide-modal');
 	const closeGuideModal = document.querySelector('.close-guide-modal');
 	const guidePrev = document.getElementById('guide-prev');
@@ -1146,9 +1150,13 @@ window.addEventListener('load', async () => {
 	const guideStatus = document.getElementById('guide-status');
 	const exitGuideModeBtn = document.getElementById('exit-guide-mode');
 
-	guideModeBtn.addEventListener('click', () => {
-		guideModal.classList.remove('hidden');
-	});
+	function showGuideIntroState() {
+		guidePrev.disabled = true;
+		guideNext.disabled = false;
+		guideStatus.textContent = 'Click Next to start';
+	}
+
+	// Removed floating guide button; guide is triggered via bottom quick action
 
 	closeGuideModal.addEventListener('click', () => {
 		guideModal.classList.add('hidden');
@@ -1167,12 +1175,24 @@ window.addEventListener('load', async () => {
 		}
 	});
 
+	// Load images for inline panel on first open of guide panel
+	let inlineImagesLoaded = false;
+	guideToggleBtn.addEventListener('click', () => {
+		const wasOpen = !expansionPanel.classList.contains('hidden') && !panelGuide.classList.contains('hidden');
+		togglePanel('guide');
+		if (!wasOpen && !inlineImagesLoaded) {
+			loadAvailableImages();
+			inlineImagesLoaded = true;
+		}
+	});
+
 	guidePrev.addEventListener('click', showPreviousStep);
 	guideNext.addEventListener('click', showNextStep);
 
 	// Guide mode functions
 	function loadAvailableImages() {
 		imageList.innerHTML = '';
+		inlineImageList.innerHTML = '';
 		fetch('/api/images/svg')
 			.then(resp => resp.json())
 			.then(({ images }) => {
@@ -1186,10 +1206,20 @@ window.addEventListener('load', async () => {
 						imageSelection.classList.add('hidden');
 					});
 					imageList.appendChild(imageItem);
+
+					const inlineItem = imageItem.cloneNode(true);
+					inlineItem.addEventListener('click', () => {
+						loadSvgForGuide(url);
+						// Open the modal only AFTER we've chosen the picture
+						guideModal.classList.remove('hidden');
+						showGuideIntroState();
+					});
+					inlineImageList.appendChild(inlineItem);
 				});
 			})
 			.catch(() => {
 				imageList.innerHTML = '<div style="padding:8px;color:#ccc;">No images found</div>';
+				inlineImageList.innerHTML = '<div style="padding:8px;color:#ccc;">No images found</div>';
 			});
 	}
 
@@ -1256,6 +1286,10 @@ window.addEventListener('load', async () => {
 			cleanupMountedSvg();
 			return;
 		}
+
+		// At this point we have a valid image; ensure the modal is visible and reset controls
+		guideModal.classList.remove('hidden');
+		showGuideIntroState();
 
 		// Start guide mode
 		isGuideMode = true;

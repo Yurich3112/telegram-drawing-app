@@ -26,10 +26,7 @@
         </div>
     </div>
 
-    <!-- Guide mode button -->
-    <button id="guide-mode-btn" class="guide-button" title="Step-by-step Guide">
-        <i class="fa-solid fa-image"></i>
-    </button>
+    <!-- Guide mode button (removed in favor of bottom quick action) -->
 
     <!-- Guide mode modal -->
     <div id="guide-modal" class="guide-modal hidden">
@@ -78,12 +75,17 @@
                 <button class="action" id="redoBtn" title="Redo"><i class="fa-solid fa-rotate-right"></i></button>
                 <button class="action" id="clearBtn" title="Clear Canvas"><i class="fa-solid fa-trash"></i></button>
             </div>
+            <!-- Guide panel (inline image selection) -->
+            <div id="panel-guide" class="panel hidden">
+                <div id="inline-image-list" class="image-list"></div>
+            </div>
         </div>
         <div id="quick-actions">
             <button id="toolToggleBtn" class="square" title="Tools"><i class="fa-solid fa-paintbrush"></i></button>
             <button id="sizeToggleBtn" class="square" title="Size"><span id="sizeDot"></span></button>
             <button id="colorToggleBtn" class="square" title="Color"><span id="colorSwatch"></span></button>
             <button id="historyToggleBtn" class="square" title="History"><i class="fa-solid fa-rotate-left"></i></button>
+            <button id="guideToggleBtn" class="square" title="Guide"><i class="fa-solid fa-image"></i></button>
         </div>
     </div>
 
