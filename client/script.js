@@ -208,6 +208,11 @@ window.addEventListener('load', async () => {
 	let guideHiddenHost = null; // Hidden host div
 	let loadedSvgViewBox = null; // {minX, minY, width, height}
 
+	// Advanced slideshow grouping configuration (tweakable)
+	let GUIDE_GLOBAL_MIN_AREA_THRESHOLD = 50; // Filter out shapes <= this area
+	const GUIDE_LARGE_SHAPE_THRESHOLD = 5000; // Large shapes start new logical blocks
+	let GUIDE_LOOK_AHEAD_STEPS = 5; // How many subsequent blocks to scan for same-color merges
+
 	// Per-step local undo/redo for guide mode
 	const MAX_STEP_HISTORY = 30;
 	let stepHistory = [];
@@ -1289,29 +1294,180 @@ window.addEventListener('load', async () => {
 	}
 
 	function extractAndSortShapes() {
-		const rawShapes = loadedSvgDocument.querySelectorAll('rect, circle, ellipse, polygon, path');
-		const groupedShapes = {};
+		// Stage 1: Initial collection with comprehensive visibility and area filtering
+		const allShapeElements = loadedSvgDocument.querySelectorAll('rect, circle, ellipse, polygon, path');
+		/** @type {{ element: Element, color: string, area: number, domIndex: number }[]} */
+		const allFilteredShapeData = [];
 
-		rawShapes.forEach(shape => {
-			const color = getEffectiveColor(shape);
-			if (!color) return;
-			const normalized = color.toLowerCase().trim();
-			if (normalized === 'none' || normalized === 'transparent' || normalized === 'rgba(0, 0, 0, 0)') return;
+		allShapeElements.forEach((shape, domIndex) => {
+			// Compute general visibility
+			let computedStyle;
+			try { computedStyle = window.getComputedStyle(shape); } catch (_) { computedStyle = null; }
+			if (!computedStyle) return;
+			const display = computedStyle.getPropertyValue('display');
+			const visibility = computedStyle.getPropertyValue('visibility');
+			const opacity = parseFloat(computedStyle.getPropertyValue('opacity'));
+			if (display === 'none' || visibility === 'hidden' || opacity === 0) return;
+
+			// Determine effective color and its source (fill/stroke/computed)
+			const colorInfo = getEffectiveColorInfo(shape);
+			if (!colorInfo || !colorInfo.hexColor) return;
+
+			// Respect specific opacities based on color source
+			const fillOpacity = parseFloat(computedStyle.getPropertyValue('fill-opacity'));
+			const strokeOpacity = parseFloat(computedStyle.getPropertyValue('stroke-opacity'));
+			let isTransparentForSource = false;
+			if (colorInfo.source && colorInfo.source.includes('fill') && fillOpacity === 0) isTransparentForSource = true;
+			if (colorInfo.source && colorInfo.source.includes('stroke') && strokeOpacity === 0) isTransparentForSource = true;
+			if (isTransparentForSource) return;
+
+			// Area calculation and global min-area filtering
 			const area = calculateShapeArea(shape);
-			if (area > 0) {
-				if (!groupedShapes[normalized]) groupedShapes[normalized] = [];
-				groupedShapes[normalized].push({ element: shape, area });
-			}
+			if (area <= GUIDE_GLOBAL_MIN_AREA_THRESHOLD) return;
+
+			allFilteredShapeData.push({ element: shape, color: colorInfo.hexColor, area, domIndex });
 		});
 
-		sortedColorGroups = [];
-		for (const color in groupedShapes) {
-			const shapesInGroup = groupedShapes[color];
-			const totalArea = shapesInGroup.reduce((sum, s) => sum + s.area, 0);
-			sortedColorGroups.push({ color: color, totalArea: totalArea, shapes: shapesInGroup });
+		if (allFilteredShapeData.length === 0) {
+			sortedColorGroups = [];
+			return;
 		}
 
-		sortedColorGroups.sort((a, b) => b.totalArea - a.totalArea);
+		// Stage 2: Generate Unmerged Logical Blocks (ULBs) in DOM order
+		/** @type {Array<Array<{ element: Element, color: string, area: number, domIndex: number }>>} */
+		const preMergeSteps = [];
+		let currentULB = [];
+		let previousShapeData = null;
+
+		allFilteredShapeData.forEach(shapeData => {
+			const isFirst = currentULB.length === 0 && !previousShapeData;
+			const isColorChange = previousShapeData && (shapeData.color !== previousShapeData.color);
+			const isLargeShape = shapeData.area >= GUIDE_LARGE_SHAPE_THRESHOLD;
+
+			if (isFirst || isColorChange || isLargeShape) {
+				if (currentULB.length > 0) {
+					currentULB.sort((a, b) => b.area - a.area);
+					preMergeSteps.push(currentULB);
+				}
+				currentULB = [shapeData];
+			} else {
+				currentULB.push(shapeData);
+			}
+			previousShapeData = shapeData;
+		});
+		if (currentULB.length > 0) {
+			currentULB.sort((a, b) => b.area - a.area);
+			preMergeSteps.push(currentULB);
+		}
+
+		// Stage 3: Look-ahead merging of same-colored blocks with barrier on color change
+		const finalSteps = [];
+		const visited = new Set();
+		for (let i = 0; i < preMergeSteps.length; i++) {
+			if (visited.has(i)) continue;
+			const baseBlock = preMergeSteps[i];
+			const mainColor = baseBlock[0].color;
+			let merged = [...baseBlock];
+			visited.add(i);
+
+			for (let j = i + 1; j < preMergeSteps.length && (j - i) <= GUIDE_LOOK_AHEAD_STEPS; j++) {
+				if (visited.has(j)) continue;
+				const candidate = preMergeSteps[j];
+				const allSameColor = candidate.every(s => s.color === mainColor);
+				if (!allSameColor) break; // barrier: stop look-ahead on first different color block
+				merged.push(...candidate);
+				visited.add(j);
+			}
+
+			merged.sort((a, b) => b.area - a.area);
+			const totalArea = merged.reduce((sum, s) => sum + s.area, 0);
+			finalSteps.push({ color: mainColor, totalArea, shapes: merged });
+		}
+
+		// The consumer expects `sortedColorGroups` structure for rendering and navigation
+		sortedColorGroups = finalSteps;
+	}
+
+	// Determine the effective display color of an SVG element and convert to standardized hex
+	// Returns { hexColor: '#RRGGBB' | null, source: 'fill'|'stroke'|'computedFill'|'computedStroke'|null }
+	function getEffectiveColorInfo(element) {
+		let color;
+		let hex;
+		// 1) inline fill
+		color = element.getAttribute('fill');
+		hex = convertCssColorToHex(color, element);
+		if (hex) return { hexColor: hex, source: 'fill' };
+		// 2) inline stroke
+		color = element.getAttribute('stroke');
+		hex = convertCssColorToHex(color, element);
+		if (hex) return { hexColor: hex, source: 'stroke' };
+		// 3) computed styles
+		try {
+			const cs = window.getComputedStyle(element);
+			color = cs.getPropertyValue('fill');
+			hex = convertCssColorToHex(color, element);
+			if (hex) return { hexColor: hex, source: 'computedFill' };
+			color = cs.getPropertyValue('stroke');
+			hex = convertCssColorToHex(color, element);
+			if (hex) return { hexColor: hex, source: 'computedStroke' };
+		} catch (_) {}
+		return { hexColor: null, source: null };
+	}
+
+	// Convert various CSS color formats (hex, rgb/rgba, named, currentColor, gradients) to #RRGGBB
+	function convertCssColorToHex(colorString, element) {
+		if (!colorString) return null;
+		const lower = colorString.toLowerCase().trim();
+		if (lower === 'none' || lower === 'transparent') return null;
+
+		// Gradients: url(#id) -> take first stop-color
+		if (lower.startsWith('url(') && lower.includes('#')) {
+			const idMatch = lower.match(/url\(["']?#([^"']+)["']?\)/);
+			if (idMatch) {
+				const gradientId = idMatch[1];
+				const gradEl = element.ownerDocument.getElementById(gradientId);
+				if (gradEl && (gradEl.tagName.toLowerCase() === 'lineargradient' || gradEl.tagName.toLowerCase() === 'radialgradient')) {
+					const firstStop = gradEl.querySelector('stop');
+					if (firstStop) {
+						return convertCssColorToHex(firstStop.getAttribute('stop-color') || 'black', element);
+					}
+				}
+			}
+			return null;
+		}
+
+		// Hex formats #RGB or #RRGGBB
+		const hexMatch = colorString.match(/^#([0-9A-Fa-f]{3}){1,2}$/);
+		if (hexMatch) {
+			if (colorString.length === 4) {
+				return ('#' + colorString[1] + colorString[1] + colorString[2] + colorString[2] + colorString[3] + colorString[3]).toUpperCase();
+			}
+			return colorString.toUpperCase();
+		}
+
+		// currentColor -> resolve from computed color
+		let resolved = colorString;
+		if (lower === 'currentcolor') {
+			try { resolved = window.getComputedStyle(element).getPropertyValue('color'); } catch (_) {}
+		}
+
+		// Use a temp element to resolve named colors/rgb to a computed rgb(a)
+		const temp = document.createElement('div');
+		temp.style.color = resolved;
+		document.body.appendChild(temp);
+		const computed = getComputedStyle(temp).color;
+		document.body.removeChild(temp);
+		const rgbMatch = computed && computed.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*(\d*\.?\d+))?\)/);
+		if (rgbMatch) {
+			const r = parseInt(rgbMatch[1], 10);
+			const g = parseInt(rgbMatch[2], 10);
+			const b = parseInt(rgbMatch[3], 10);
+			const a = rgbMatch[4] !== undefined ? parseFloat(rgbMatch[4]) : 1;
+			if (a === 0) return null;
+			const toHex = (c) => ('0' + c.toString(16)).slice(-2);
+			return ('#' + toHex(r) + toHex(g) + toHex(b)).toUpperCase();
+		}
+		return null;
 	}
 
 	function getEffectiveColor(element) {
