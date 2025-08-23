@@ -26,18 +26,11 @@
         </div>
     </div>
 
-    <!-- Guide mode button (removed in favor of bottom quick action) -->
-
-    <!-- Guide mode modal -->
+    <!-- Guide mode modal (kept for image gallery) -->
     <div id="guide-modal" class="guide-modal hidden">
         <div class="guide-modal-content">
             <span class="close-guide-modal">&times;</span>
             <h3>Step-by-Step Guide</h3>
-            <div class="guide-controls">
-                <button id="guide-prev" class="guide-nav" disabled><i class="fa-solid fa-chevron-left"></i></button>
-                <button id="guide-select-image" class="guide-nav"><i class="fa-solid fa-image"></i></button>
-                <button id="guide-next" class="guide-nav" disabled><i class="fa-solid fa-chevron-right"></i></button>
-            </div>
             <div id="guide-status" class="guide-status">Select an image to start</div>
             <button id="exit-guide-mode" class="exit-guide-btn hidden">Exit Guide Mode</button>
             
@@ -75,9 +68,11 @@
                 <button class="action" id="redoBtn" title="Redo"><i class="fa-solid fa-rotate-right"></i></button>
                 <button class="action" id="clearBtn" title="Clear Canvas"><i class="fa-solid fa-trash"></i></button>
             </div>
-            <!-- Guide panel (inline image selection) -->
+            <!-- Guide panel -->
             <div id="panel-guide" class="panel hidden">
-                <div id="inline-image-list" class="image-list"></div>
+                <button id="guide-prev" class="guide-nav" title="Previous Step" disabled><i class="fa-solid fa-chevron-left"></i></button>
+                <button id="guide-select-image" class="guide-nav" title="Select Image"><i class="fa-solid fa-image"></i></button>
+                <button id="guide-next" class="guide-nav" title="Next Step" disabled><i class="fa-solid fa-chevron-right"></i></button>
             </div>
         </div>
         <div id="quick-actions">

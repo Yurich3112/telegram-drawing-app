@@ -198,28 +198,7 @@ input[type="range"] { -webkit-appearance: none; appearance: none; width: min(60v
     border-radius: 8px;
 }
 
-/* Guide mode button */
-.guide-button {
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    background: var(--button-bg);
-    color: white;
-    border: none;
-    font-size: 20px;
-    cursor: pointer;
-    z-index: 100;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    transition: background-color 0.2s, transform 0.2s;
-}
-
-.guide-button:hover {
-    background: var(--button-hover-bg);
-    transform: scale(1.05);
-}
+/* Removed floating guide button */
 
 /* Guide modal */
 .guide-modal {
@@ -290,6 +269,14 @@ input[type="range"] { -webkit-appearance: none; appearance: none; width: min(60v
     background: #ccc;
     cursor: not-allowed;
     opacity: 0.5;
+}
+
+/* Guide center button confirm state */
+.guide-confirm {
+    background: #27ae60;
+}
+.guide-confirm:hover {
+    background: #2ecc71;
 }
 
 .guide-status {

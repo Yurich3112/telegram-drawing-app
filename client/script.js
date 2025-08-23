@@ -124,7 +124,6 @@ window.addEventListener('load', async () => {
 	const guideToggleBtn = document.getElementById('guideToggleBtn');
 	const sizeDot = document.getElementById('sizeDot');
 	const colorSwatch = document.getElementById('colorSwatch');
-	const inlineImageList = document.getElementById('inline-image-list');
 
 	const colorPicker = document.getElementById('colorPicker');
 	const brushSize = document.getElementById('brushSize');
@@ -1150,14 +1149,6 @@ window.addEventListener('load', async () => {
 	const guideStatus = document.getElementById('guide-status');
 	const exitGuideModeBtn = document.getElementById('exit-guide-mode');
 
-	function showGuideIntroState() {
-		guidePrev.disabled = true;
-		guideNext.disabled = false;
-		guideStatus.textContent = 'Click Next to start';
-	}
-
-	// Removed floating guide button; guide is triggered via bottom quick action
-
 	closeGuideModal.addEventListener('click', () => {
 		guideModal.classList.add('hidden');
 		imageSelection.classList.add('hidden');
@@ -1168,22 +1159,27 @@ window.addEventListener('load', async () => {
 		guideModal.classList.add('hidden');
 	});
 
-	guideSelectImage.addEventListener('click', () => {
-		imageSelection.classList.toggle('hidden');
-		if (!imageSelection.classList.contains('hidden')) {
-			loadAvailableImages();
-		}
-	});
+	// Center guide button behavior: opens gallery when no image, becomes confirm/exit when image selected
+	function setGuideCenterButtonState() {
+		const hasImageSelected = !!currentSvgPath;
+		const icon = hasImageSelected ? 'fa-check' : 'fa-image';
+		guideSelectImage.innerHTML = `<i class="fa-solid ${icon}"></i>`;
+		guideSelectImage.classList.toggle('guide-confirm', hasImageSelected);
+	}
 
-	// Load images for inline panel on first open of guide panel
-	let inlineImagesLoaded = false;
-	guideToggleBtn.addEventListener('click', () => {
-		const wasOpen = !expansionPanel.classList.contains('hidden') && !panelGuide.classList.contains('hidden');
-		togglePanel('guide');
-		if (!wasOpen && !inlineImagesLoaded) {
-			loadAvailableImages();
-			inlineImagesLoaded = true;
+	guideSelectImage.addEventListener('click', () => {
+		// If image already selected, confirm and exit guide mode
+		if (currentSvgPath) {
+			exitGuideMode();
+			setGuideCenterButtonState();
+			guideModal.classList.add('hidden');
+			imageSelection.classList.add('hidden');
+			return;
 		}
+		// Otherwise open gallery
+		guideModal.classList.remove('hidden');
+		imageSelection.classList.remove('hidden');
+		loadAvailableImages();
 	});
 
 	guidePrev.addEventListener('click', showPreviousStep);
@@ -1192,7 +1188,6 @@ window.addEventListener('load', async () => {
 	// Guide mode functions
 	function loadAvailableImages() {
 		imageList.innerHTML = '';
-		inlineImageList.innerHTML = '';
 		fetch('/api/images/svg')
 			.then(resp => resp.json())
 			.then(({ images }) => {
@@ -1204,22 +1199,14 @@ window.addEventListener('load', async () => {
 					imageItem.addEventListener('click', () => {
 						loadSvgForGuide(url);
 						imageSelection.classList.add('hidden');
+						guideModal.classList.add('hidden');
+						setGuideCenterButtonState();
 					});
 					imageList.appendChild(imageItem);
-
-					const inlineItem = imageItem.cloneNode(true);
-					inlineItem.addEventListener('click', () => {
-						loadSvgForGuide(url);
-						// Open the modal only AFTER we've chosen the picture
-						guideModal.classList.remove('hidden');
-						showGuideIntroState();
-					});
-					inlineImageList.appendChild(inlineItem);
 				});
 			})
 			.catch(() => {
 				imageList.innerHTML = '<div style="padding:8px;color:#ccc;">No images found</div>';
-				inlineImageList.innerHTML = '<div style="padding:8px;color:#ccc;">No images found</div>';
 			});
 	}
 
@@ -1287,16 +1274,13 @@ window.addEventListener('load', async () => {
 			return;
 		}
 
-		// At this point we have a valid image; ensure the modal is visible and reset controls
-		guideModal.classList.remove('hidden');
-		showGuideIntroState();
-
 		// Start guide mode
 		isGuideMode = true;
 		currentGuideStep = -1;
 		guideStatus.textContent = `Loaded ${sortedColorGroups.length} color groups. Click Next to start.`;
 		updateGuideControls();
 		exitGuideModeBtn.classList.remove('hidden');
+		setGuideCenterButtonState();
 		render();
 		initStepHistory();
 
@@ -1589,6 +1573,7 @@ window.addEventListener('load', async () => {
 	function updateGuideControls() {
 		guidePrev.disabled = currentGuideStep <= -1;
 		guideNext.disabled = currentGuideStep >= sortedColorGroups.length - 1 || sortedColorGroups.length === 0;
+		setGuideCenterButtonState();
 		
 		// Check if all steps are completed
 		if (currentGuideStep >= sortedColorGroups.length - 1 && sortedColorGroups.length > 0) {
@@ -1616,8 +1601,9 @@ window.addEventListener('load', async () => {
 			loadedSvgViewBox = null;
 			cleanupMountedSvg();
 			
-			// Hide exit button
+			// Hide exit button and reset center button
 			exitGuideModeBtn.classList.add('hidden');
+			setGuideCenterButtonState();
 			
 			// Prepare authoritative base snapshot and save
 			const baseDataUrl = drawingCanvas.toDataURL();
@@ -1645,4 +1631,5 @@ window.addEventListener('load', async () => {
 	// reflect current UI state
 	colorSwatch.style.backgroundColor = currentColor;
 	sizeDot.style.width = sizeDot.style.height = Math.max(8, Math.min(32, currentSize)) + 'px';
+	setGuideCenterButtonState();
 });
